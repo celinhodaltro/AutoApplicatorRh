@@ -6,6 +6,7 @@ public interface IProfileRepository
 {
     Task<SearchProfile?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<SearchProfile>> GetAllAsync(CancellationToken cancellationToken = default);
+    Task<IEnumerable<SearchProfile>> GetEnabledProfilesAsync();
     Task AddAsync(SearchProfile profile, CancellationToken cancellationToken = default);
     Task UpdateAsync(SearchProfile profile, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);

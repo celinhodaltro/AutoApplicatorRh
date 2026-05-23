@@ -74,7 +74,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Application\AutoApplicator.Application.csproj" />
+      <ProjectReference Include="..\Core\Application\AutoApplicator.Application.csproj" />
       <ProjectReference Include="..\Infrastructure\AutoApplicator.Infrastructure.csproj" />
     </ItemGroup>
 

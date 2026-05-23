@@ -17,9 +17,12 @@ public static class MauiProgram
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
             });
 
+        var dbPath = Path.Combine(FileSystem.AppDataDirectory, "AutoApplicator.db");
+        var connectionString = $"Data Source={dbPath}";
+
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddApplication();
-        builder.Services.AddInfrastructure();
+        builder.Services.AddInfrastructure(connectionString);
         builder.Services.AddRadzenComponents();
 
 #if DEBUG

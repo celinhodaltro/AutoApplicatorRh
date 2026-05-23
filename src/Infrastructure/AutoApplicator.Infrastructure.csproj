@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Application\AutoApplicator.Application.csproj" />
-    <ProjectReference Include="..\Domain\AutoApplicator.Domain.csproj" />
+    <ProjectReference Include="..\Core\Application\AutoApplicator.Application.csproj" />
+    <ProjectReference Include="..\Core\Domain\AutoApplicator.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>
