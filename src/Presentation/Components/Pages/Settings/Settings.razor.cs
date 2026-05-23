@@ -35,6 +35,15 @@ public partial class Settings
         if (firstRender) await LoadLogContent();
     }
 
+    private void SaveSettings()
+    {
+        Preferences.Set(PrefEasyApply, _globalEasyApply);
+        Preferences.Set(PrefActionDelay, _actionDelay);
+        Preferences.Set(PrefProfileCooldown, _profileCooldown);
+        Preferences.Set(PrefMaxApps, _maxApplications);
+        Preferences.Set(PrefHeadless, _headlessMode);
+    }
+
     private void OpenLogin(PlatformType platform)
     {
         var url = platform switch
@@ -126,11 +135,11 @@ public partial class Settings
 
     private static string GetLogLineClass(string line)
     {
-        if (line.Contains("[ERR]") || line.Contains("[FTL]")) return "log-line log-error";
-        if (line.Contains("[WRN]")) return "log-line log-warning";
-        if (line.Contains("[INF]")) return "log-line log-info";
-        if (line.Contains("[DBG]") || line.Contains("[VRB]")) return "log-line log-debug";
-        return "log-line";
+        if (line.Contains("[ERR]") || line.Contains("[FTL]")) return "color: #f44747;";
+        if (line.Contains("[WRN]")) return "color: #dcdcaa;";
+        if (line.Contains("[INF]")) return "color: #6a9955;";
+        if (line.Contains("[DBG]") || line.Contains("[VRB]")) return "color: #569cd6;";
+        return "";
     }
 
     private enum LogType { Services, Error }

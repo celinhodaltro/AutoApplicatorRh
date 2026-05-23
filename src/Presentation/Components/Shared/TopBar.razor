@@ -11,6 +11,7 @@
             <span class="app-name">AutoApplicator</span>
         </div>
     </div>
+
     <div class="topbar-center">
         @if (AutomationService.IsRunning)
         {
@@ -21,7 +22,16 @@
                 </span>
             </div>
         }
+        else
+        {
+            <div class="mode-selector">
+                <button class="mode-btn @(_mode == AutomationMode.Search ? "active" : "")" @onclick="() => _mode = AutomationMode.Search" title="Search for jobs only">🔍 Search</button>
+                <button class="mode-btn @(_mode == AutomationMode.Apply ? "active" : "")" @onclick="() => _mode = AutomationMode.Apply" title="Apply to approved jobs only">📤 Apply</button>
+                <button class="mode-btn @(_mode == AutomationMode.Full ? "active" : "")" @onclick="() => _mode = AutomationMode.Full" title="Search then apply">⚡ Full</button>
+            </div>
+        }
     </div>
+
     <div class="topbar-right">
         @if (AutomationService.IsRunning)
         {
@@ -29,7 +39,15 @@
         }
         else
         {
-            <button class="topbar-btn start-btn" @onclick="StartAutomation">▶ Start</button>
+            <button class="topbar-btn start-btn" @onclick="StartAutomation">
+                @(_mode switch
+                {
+                    AutomationMode.Search => "🔍 Search",
+                    AutomationMode.Apply => "📤 Apply",
+                    AutomationMode.Full => "⚡ Full Auto",
+                    _ => "▶ Start"
+                })
+            </button>
         }
         <NotificationBell />
     </div>
@@ -38,6 +56,7 @@
 @code {
     [Parameter] public EventCallback OnToggleSidebar { get; set; }
 
+    private AutomationMode _mode = AutomationMode.Search;
     private bool _subscribed;
 
     protected override void OnInitialized()
@@ -58,7 +77,7 @@
     private async Task StartAutomation()
     {
         var globalEasyApply = Preferences.Get("global_easy_apply", false);
-        await Task.Run(() => AutomationService.StartAsync(globalEasyApply));
+        await Task.Run(() => AutomationService.StartAsync(_mode, globalEasyApply));
     }
 
     private void StopAutomation()

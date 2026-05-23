@@ -204,19 +204,13 @@ public sealed class LinkedInExtractor
 
     public async Task<JobDetail> ExtractJobDetailsAsync(IPage page)
     {
-        await _behavior.DelayAsync(800, 1500);
+        await _behavior.DelayAsync(2000, 3000);
 
-        var description = await QuickTextAsync(page, DetailDescriptionSelectors);
-        if (string.IsNullOrEmpty(description))
-        {
-            description = await FallbackExtractDescriptionAsync(page);
-            if (!string.IsNullOrEmpty(description))
-                _logger.LogInformation("Fallback extracted description ({Length} chars)", description.Length);
-        }
+        var description = await ExtractDescriptionAsync(page);
 
         var salary = await ExtractSalaryAsync(page);
-        var postedDate = await QuickTextAsync(page, DetailPostedDateSelectors);
 
+        var postedDate = await QuickTextAsync(page, DetailPostedDateSelectors);
         string? postedDateStr = null;
         if (!string.IsNullOrEmpty(postedDate))
         {
@@ -228,12 +222,105 @@ public sealed class LinkedInExtractor
             }
         }
 
+        if (string.IsNullOrEmpty(description))
+            _logger.LogWarning("Could not extract description for this job");
+
         return new JobDetail
         {
             Description = description ?? string.Empty,
             Salary = salary,
             PostedDate = postedDateStr
         };
+    }
+
+    private async Task<string> ExtractDescriptionAsync(IPage page)
+    {
+        // Strategy 1: CSS selectors
+        var description = await QuickTextAsync(page, DetailDescriptionSelectors);
+        if (!string.IsNullOrEmpty(description))
+        {
+            _logger.LogInformation("Extracted description via CSS selectors ({Length} chars)", description.Length);
+            return description;
+        }
+
+        // Get HTML for all fallback strategies
+        string html;
+        try { html = await page.ContentAsync(); }
+        catch { return string.Empty; }
+
+        // Strategy 2: Page HTML with regex containers
+        try
+        {
+            var patterns = new[]
+            {
+                @"class=""[^""]*?(?:jobs-description__content|jobs-box__html|description__text|show-more-less|jobs-description)[^""]*?"">(.*?)</div>",
+                @"<article[^>]*class=""[^""]*jobs-description[^""]*""[^>]*>(.*?)</article>",
+                @"<div[^>]*id=""job-details""[^>]*>(.*?)</div>",
+                @"<section[^>]*class=""[^""]*description[^""]*""[^>]*>(.*?)</section>"
+            };
+
+            foreach (var pattern in patterns)
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(html, pattern,
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+                if (match.Success)
+                {
+                    var text = System.Text.RegularExpressions.Regex.Replace(match.Groups[1].Value, "<[^>]+>", " ");
+                    text = System.Net.WebUtility.HtmlDecode(text);
+                    text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+                    if (text.Length > 50)
+                    {
+                        _logger.LogInformation("Extracted description via HTML regex ({Length} chars)", text.Length);
+                        return text;
+                    }
+                }
+            }
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "HTML regex extraction failed"); }
+
+        // Strategy 3: Strip all HTML and find description by keywords
+        try
+        {
+            var bodyText = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " ");
+            bodyText = System.Net.WebUtility.HtmlDecode(bodyText);
+            bodyText = System.Text.RegularExpressions.Regex.Replace(bodyText, @"\s+", " ").Trim();
+
+            var descMatch = System.Text.RegularExpressions.Regex.Match(bodyText,
+                @"(About the job|Qualifications|Responsibilities|Description|Job Description|Job details)[:\s]+(.{100,}?)(?=(Qualifications|Requirements|Skills|Experience|Education|About this role|$))",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (descMatch.Success)
+            {
+                var text = descMatch.Groups[2].Value.Trim();
+                _logger.LogInformation("Extracted description via keyword regex ({Length} chars)", text.Length);
+                return text;
+            }
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Keyword extraction failed"); }
+
+        // Strategy 4: Longest text block in the page
+        try
+        {
+            var textBlocks = new List<string>();
+            var divs = System.Text.RegularExpressions.Regex.Split(html, @"<div[^>]*>", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            foreach (var block in divs)
+            {
+                var clean = System.Text.RegularExpressions.Regex.Replace(block, "<[^>]+>", " ");
+                clean = System.Net.WebUtility.HtmlDecode(clean);
+                clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\s+", " ").Trim();
+                if (clean.Length > 100 && !clean.Contains("nav") && !clean.Contains("header") && !clean.Contains("footer"))
+                    textBlocks.Add(clean);
+            }
+
+            var longest = textBlocks.OrderByDescending(t => t.Length).FirstOrDefault();
+            if (longest is not null)
+            {
+                _logger.LogInformation("Extracted description via longest text block ({Length} chars)", longest.Length);
+                return longest;
+            }
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Longest text block failed"); }
+
+        return string.Empty;
     }
 
     private static async Task<string> GetFirstVisibleTextAsync(IElementHandle parent, string[] selectors)
