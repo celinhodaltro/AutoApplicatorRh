@@ -1,0 +1,27 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.log
+*.vs/
+
+# Playwright
+.playwright/
+node_modules/
+
+# MAUI
+*.apk
+*.aab
+*.ipa
+*.app
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

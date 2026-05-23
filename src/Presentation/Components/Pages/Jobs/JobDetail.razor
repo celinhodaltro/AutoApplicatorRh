@@ -1,0 +1,188 @@
+@page "/jobs/{Id:guid}"
+@using Radzen
+@using Radzen.Blazor
+@inject IMediator Mediator
+@inject IJobRepository JobRepo
+@inject NavigationManager Navigation
+
+@if (_job is null)
+{
+    <RadzenText>Loading...</RadzenText>
+}
+else
+{
+    <RadzenButton Text="← Back to Jobs" ButtonStyle="ButtonStyle.Secondary" Click="@(() => Navigation.NavigateTo("/jobs"))" style="margin-bottom: 16px;" />
+
+    <RadzenText TextStyle="TextStyle.H4">@_job.Title</RadzenText>
+    <RadzenText TextStyle="TextStyle.H6" style="color: var(--rz-text-secondary); margin-bottom: 16px;">@_job.Company</RadzenText>
+
+    <div style="display: flex; gap: 12px; margin: 16px 0; flex-wrap: wrap;">
+        <RadzenBadge BadgeStyle="BadgeStyle.Light">@_job.Location</RadzenBadge>
+        @if (!string.IsNullOrEmpty(_job.Salary))
+        {
+            <RadzenBadge BadgeStyle="BadgeStyle.Success">@_job.Salary</RadzenBadge>
+        }
+        <RadzenBadge BadgeStyle="@GetStatusBadge(_job.Status)">@_job.Status</RadzenBadge>
+        @if (_job.MatchScore.HasValue)
+        {
+            <RadzenBadge BadgeStyle="BadgeStyle.Info">Match: @_job.MatchScore%</RadzenBadge>
+        }
+        <RadzenBadge BadgeStyle="BadgeStyle.Secondary">@_job.Platform</RadzenBadge>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 24px 0;">
+        <RadzenFieldset Text="Details">
+            <div style="display: grid; grid-template-columns: 100px 1fr; gap: 8px;">
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500;">Job Type:</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body2">@_job.JobType</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500;">Posted:</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body2">@_job.PostedDate.ToShortDateString()</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500;">Easy Apply:</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body2">@(_job.EasyApply ? "Yes" : "No")</RadzenText>
+                @if (!string.IsNullOrEmpty(_job.Url))
+                {
+                    <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500;">URL:</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2"><a href="@_job.Url" target="_blank" rel="noopener">Open</a></RadzenText>
+                }
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500;">Profile:</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body2">@_job.ProfileId</RadzenText>
+            </div>
+        </RadzenFieldset>
+
+        <RadzenFieldset Text="Match Info">
+            <div style="display: grid; grid-template-columns: 100px 1fr; gap: 8px;">
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500;">Score:</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body2">@(_job.MatchScore?.ToString() ?? "N/A")</RadzenText>
+                @if (_job.Skills.Count > 0)
+                {
+                    <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500;">Skills:</RadzenText>
+                    <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                        @foreach (var skill in _job.Skills)
+                        {
+                            <RadzenBadge BadgeStyle="BadgeStyle.Light">@skill</RadzenBadge>
+                        }
+                    </div>
+                }
+            </div>
+        </RadzenFieldset>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_job.Summary))
+    {
+        <RadzenFieldset Text="Summary" style="margin: 16px 0;">
+            <RadzenText TextStyle="TextStyle.Body2" style="white-space: pre-wrap;">@_job.Summary</RadzenText>
+        </RadzenFieldset>
+    }
+
+    <RadzenFieldset Text="Description" style="margin: 16px 0;">
+        <RadzenText TextStyle="TextStyle.Body2" style="white-space: pre-wrap; max-height: 400px; overflow-y: auto;">@_job.Description</RadzenText>
+    </RadzenFieldset>
+
+    @if (!string.IsNullOrEmpty(_job.MatchReasoning))
+    {
+        <RadzenFieldset Text="Match Reasoning" style="margin: 16px 0;">
+            <RadzenText TextStyle="TextStyle.Body2">@_job.MatchReasoning</RadzenText>
+        </RadzenFieldset>
+    }
+
+    @if (_job.RedFlags.Count > 0)
+    {
+        <RadzenFieldset Text="Red Flags" style="margin: 16px 0;">
+            @foreach (var flag in _job.RedFlags)
+            {
+                <RadzenText TextStyle="TextStyle.Body2" style="color: var(--rz-danger);">• @flag</RadzenText>
+            }
+        </RadzenFieldset>
+    }
+
+    @if (_job.Highlights.Count > 0)
+    {
+        <RadzenFieldset Text="Highlights" style="margin: 16px 0;">
+            @foreach (var highlight in _job.Highlights)
+            {
+                <RadzenText TextStyle="TextStyle.Body2" style="color: var(--rz-success);">• @highlight</RadzenText>
+            }
+        </RadzenFieldset>
+    }
+
+    <RadzenFieldset Text="Application" style="margin: 16px 0;">
+        <div style="display: grid; grid-template-columns: 100px 1fr; gap: 8px;">
+            @if (!string.IsNullOrEmpty(_job.ResumeUsed))
+            {
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500;">Resume:</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body2">@_job.ResumeUsed</RadzenText>
+            }
+            @if (!string.IsNullOrEmpty(_job.CoverLetterUsed))
+            {
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500;">Cover Letter:</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body2">@_job.CoverLetterUsed</RadzenText>
+            }
+            @if (!string.IsNullOrEmpty(_job.UserNotes))
+            {
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500;">Notes:</RadzenText>
+                <RadzenText TextStyle="TextStyle.Body2" style="white-space: pre-wrap;">@_job.UserNotes</RadzenText>
+            }
+        </div>
+    </RadzenFieldset>
+
+    <div style="display: flex; gap: 8px; margin-top: 24px;">
+        @if (_job.Status is JobStatus.New or JobStatus.Reviewed)
+        {
+            <RadzenButton Text="Approve" ButtonStyle="ButtonStyle.Success" Click="@Approve" />
+            <RadzenButton Text="Reject" ButtonStyle="ButtonStyle.Warning" Click="@Reject" />
+        }
+        @if (_job.Status == JobStatus.Approved)
+        {
+            <RadzenButton Text="Apply Now" ButtonStyle="ButtonStyle.Primary" Click="@Apply" />
+        }
+        <RadzenButton Text="Delete" ButtonStyle="ButtonStyle.Danger" Click="@Delete" />
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private JobListing? _job;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _job = await Mediator.Send(new GetJobByIdQuery(Id));
+    }
+
+    private async Task Approve()
+    {
+        if (_job is null) return;
+        _job = await Mediator.Send(new ApproveJobCommand(_job.Id));
+    }
+
+    private async Task Reject()
+    {
+        if (_job is null) return;
+        _job = await Mediator.Send(new RejectJobCommand(_job.Id));
+    }
+
+    private async Task Apply()
+    {
+        if (_job is null) return;
+        _job = await Mediator.Send(new ApplyToJobCommand(_job.Id));
+    }
+
+    private async Task Delete()
+    {
+        if (_job is null) return;
+        await JobRepo.DeleteAsync(_job.Id, default);
+        Navigation.NavigateTo("/jobs");
+    }
+
+    private static BadgeStyle GetStatusBadge(JobStatus status) => status switch
+    {
+        JobStatus.New => BadgeStyle.Info,
+        JobStatus.Reviewed => BadgeStyle.Warning,
+        JobStatus.Approved => BadgeStyle.Success,
+        JobStatus.Rejected => BadgeStyle.Danger,
+        JobStatus.Applied => BadgeStyle.Primary,
+        JobStatus.Skipped => BadgeStyle.Light,
+        JobStatus.Error => BadgeStyle.Danger,
+        _ => BadgeStyle.Light,
+    };
+}

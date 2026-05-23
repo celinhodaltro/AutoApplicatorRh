@@ -1,0 +1,27 @@
+﻿@inherits LayoutComponentBase
+
+<div class="app-layout" style="display: flex; height: 100vh; overflow: hidden;">
+    <RadzenSidebar Expanded="true" Style="width: 250px; flex-shrink: 0; display: flex; flex-direction: column;">
+        <div style="padding: 16px 16px; border-bottom: 1px solid var(--rz-sidebar-border);">
+            <RadzenText TextStyle="TextStyle.H5" style="margin: 0;">AutoApplicator</RadzenText>
+        </div>
+        <RadzenPanelMenu Style="flex: 1;">
+            <RadzenPanelMenuItem Text="Profiles" Path="profiles" Icon="account_circle" />
+            <RadzenPanelMenuItem Text="Jobs" Path="jobs" Icon="work" />
+            <RadzenPanelMenuItem Text="Questions" Path="questions" Icon="help" />
+            <RadzenPanelMenuItem Text="Settings" Path="settings" Icon="settings" />
+        </RadzenPanelMenu>
+    </RadzenSidebar>
+    <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 24px; border-bottom: 1px solid var(--rz-grid-border); background: var(--rz-surface);">
+            <RadzenText TextStyle="TextStyle.Subtitle2">AutoApplicator</RadzenText>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #4caf50; display: inline-block;"></span>
+                <RadzenText TextStyle="TextStyle.Body2" style="color: var(--rz-text-secondary);">Online</RadzenText>
+            </div>
+        </div>
+        <div style="flex: 1; padding: 24px; overflow-y: auto; background: var(--rz-page-background);">
+            @Body
+        </div>
+    </div>
+</div>

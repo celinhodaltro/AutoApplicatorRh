@@ -1,0 +1,172 @@
+@page "/jobs"
+@using Radzen
+@using Radzen.Blazor
+@inject IMediator Mediator
+@inject IJobRepository JobRepo
+@inject NavigationManager Navigation
+
+<RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 24px;">Jobs</RadzenText>
+
+<div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+    <RadzenButton Text="All" Size="ButtonSize.Small"
+        ButtonStyle="@(_statusFilter is null ? ButtonStyle.Primary : ButtonStyle.Base)"
+        Click="@(() => FilterByStatus(null))" />
+    @foreach (var status in Enum.GetValues<JobStatus>())
+    {
+        <RadzenButton Text="@status.ToString()" Size="ButtonSize.Small"
+            ButtonStyle="@(_statusFilter == status ? ButtonStyle.Primary : ButtonStyle.Base)"
+            Click="@(() => FilterByStatus(status))" />
+    }
+</div>
+
+<div style="margin-bottom: 16px; display: flex; gap: 8px; align-items: center;">
+    <RadzenButton Text="Approve Selected" ButtonStyle="ButtonStyle.Success"
+        Disabled="@(_selectedIds.Count == 0)" Click="@BatchApprove" />
+    <RadzenButton Text="Reject Selected" ButtonStyle="ButtonStyle.Warning"
+        Disabled="@(_selectedIds.Count == 0)" Click="@BatchReject" />
+    <RadzenButton Text="Delete Selected" ButtonStyle="ButtonStyle.Danger"
+        Disabled="@(_selectedIds.Count == 0)" Click="@BatchDelete" />
+    <RadzenText TextStyle="TextStyle.Body2" style="color: var(--rz-text-secondary); margin-left: 8px;">
+        @_selectedIds.Count selected
+    </RadzenText>
+</div>
+
+<div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="border-bottom: 2px solid var(--rz-grid-border); text-align: left;">
+                <th style="padding: 8px 12px; font-weight: 600; width: 40px;"></th>
+                <th style="padding: 8px 12px; font-weight: 600;">Title</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Company</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Location</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Platform</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Status</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Match</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Posted</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var job in _filteredJobs)
+            {
+                <tr style="border-bottom: 1px solid var(--rz-grid-border);">
+                    <td style="padding: 8px 12px;">
+                        <input type="checkbox" checked="@_selectedIds.Contains(job.Id)"
+                            @onchange="@((ChangeEventArgs e) => ToggleSelection(job.Id, (bool)(e.Value ?? false)))" />
+                    </td>
+                    <td style="padding: 8px 12px;">
+                        <a href="/jobs/@job.Id" style="text-decoration: none; color: var(--rz-primary);">@job.Title</a>
+                    </td>
+                    <td style="padding: 8px 12px;">@job.Company</td>
+                    <td style="padding: 8px 12px;">@job.Location</td>
+                    <td style="padding: 8px 12px;">@job.Platform</td>
+                    <td style="padding: 8px 12px;">
+                        <RadzenBadge BadgeStyle="@GetStatusBadge(job.Status)">@job.Status</RadzenBadge>
+                    </td>
+                    <td style="padding: 8px 12px;">@job.MatchScore</td>
+                    <td style="padding: 8px 12px;">@job.PostedDate.ToShortDateString()</td>
+                    <td style="padding: 8px 12px; display: flex; gap: 4px;">
+                        <RadzenButton Text="View" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Secondary"
+                            Click="@(() => Navigation.NavigateTo($"/jobs/{job.Id}"))" />
+                        @if (job.Status is JobStatus.New or JobStatus.Reviewed)
+                        {
+                            <RadzenButton Text="Approve" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Success"
+                                Click="@(() => ApproveSingle(job))" />
+                            <RadzenButton Text="Reject" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Warning"
+                                Click="@(() => RejectSingle(job))" />
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    private List<JobListing> _allJobs = [];
+    private List<JobListing> _filteredJobs = [];
+    private HashSet<Guid> _selectedIds = [];
+    private JobStatus? _statusFilter;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadJobs();
+    }
+
+    private async Task LoadJobs()
+    {
+        _allJobs = await Mediator.Send(new GetJobsQuery(Status: null, Platform: null, Page: 1, PageSize: 200));
+        _selectedIds.Clear();
+        ApplyFilter();
+    }
+
+    private void FilterByStatus(JobStatus? status)
+    {
+        _statusFilter = status;
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        _filteredJobs = _statusFilter.HasValue
+            ? _allJobs.Where(j => j.Status == _statusFilter.Value).ToList()
+            : [.. _allJobs];
+    }
+
+    private void ToggleSelection(Guid id, bool isSelected)
+    {
+        if (isSelected) _selectedIds.Add(id);
+        else _selectedIds.Remove(id);
+    }
+
+    private async Task BatchApprove()
+    {
+        await Mediator.Send(new BatchApproveJobsCommand(_selectedIds.ToList()));
+        _selectedIds.Clear();
+        await LoadJobs();
+    }
+
+    private async Task BatchReject()
+    {
+        foreach (var id in _selectedIds.ToList())
+        {
+            await Mediator.Send(new RejectJobCommand(id));
+        }
+        _selectedIds.Clear();
+        await LoadJobs();
+    }
+
+    private async Task BatchDelete()
+    {
+        foreach (var id in _selectedIds.ToList())
+        {
+            await JobRepo.DeleteAsync(id, default);
+        }
+        _selectedIds.Clear();
+        await LoadJobs();
+    }
+
+    private async Task ApproveSingle(JobListing job)
+    {
+        await Mediator.Send(new ApproveJobCommand(job.Id));
+        await LoadJobs();
+    }
+
+    private async Task RejectSingle(JobListing job)
+    {
+        await Mediator.Send(new RejectJobCommand(job.Id));
+        await LoadJobs();
+    }
+
+    private static BadgeStyle GetStatusBadge(JobStatus status) => status switch
+    {
+        JobStatus.New => BadgeStyle.Info,
+        JobStatus.Reviewed => BadgeStyle.Warning,
+        JobStatus.Approved => BadgeStyle.Success,
+        JobStatus.Rejected => BadgeStyle.Danger,
+        JobStatus.Applied => BadgeStyle.Primary,
+        JobStatus.Skipped => BadgeStyle.Light,
+        JobStatus.Error => BadgeStyle.Danger,
+        _ => BadgeStyle.Light,
+    };
+}

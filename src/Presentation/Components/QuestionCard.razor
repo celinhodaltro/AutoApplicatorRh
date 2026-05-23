@@ -1,0 +1,37 @@
+<div style="border: 1px solid var(--rz-grid-border); border-radius: 8px; padding: 16px; background: var(--rz-surface); margin-bottom: 12px; @(string.IsNullOrEmpty(Question.Answer) ? "border-left: 4px solid var(--rz-danger);" : "")">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div style="flex: 1;">
+            <RadzenText TextStyle="TextStyle.Body1" style="font-weight: 500;">@Question.QuestionText</RadzenText>
+            <div style="display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+                <RadzenBadge BadgeStyle="BadgeStyle.Light">@Question.FieldType</RadzenBadge>
+                @if (Question.Platform.HasValue)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Info">@Question.Platform</RadzenBadge>
+                }
+                @if (!string.IsNullOrEmpty(Question.Company))
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Secondary">@Question.Company</RadzenBadge>
+                }
+                @if (string.IsNullOrEmpty(Question.Answer))
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Danger">Unanswered</RadzenBadge>
+                }
+            </div>
+        </div>
+    </div>
+    <div style="margin-top: 12px;">
+        @AnswerInput
+    </div>
+    @if (ChildContent is not null)
+    {
+        <div style="margin-top: 8px; display: flex; gap: 8px;">
+            @ChildContent
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public CollectedQuestion Question { get; set; } = default!;
+    [Parameter] public RenderFragment? AnswerInput { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

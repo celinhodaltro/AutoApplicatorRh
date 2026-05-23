@@ -1,0 +1,274 @@
+@page "/profiles"
+@using Radzen
+@using Radzen.Blazor
+@inject IProfileRepository ProfileRepo
+
+<RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 24px;">Search Profiles</RadzenText>
+
+<div style="margin-bottom: 16px;">
+    <RadzenButton Text="New Profile" ButtonStyle="ButtonStyle.Primary" Click="@OpenNew" />
+</div>
+
+<div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="border-bottom: 2px solid var(--rz-grid-border); text-align: left;">
+                <th style="padding: 8px 12px; font-weight: 600;">Name</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Platform</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Keywords</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Active</th>
+                <th style="padding: 8px 12px; font-weight: 600;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var profile in _profiles)
+            {
+                <tr style="border-bottom: 1px solid var(--rz-grid-border);">
+                    <td style="padding: 8px 12px;">@profile.Name</td>
+                    <td style="padding: 8px 12px;">@profile.Platform</td>
+                    <td style="padding: 8px 12px;">@string.Join(", ", profile.Keywords.Take(3))@(profile.Keywords.Count > 3 ? "..." : "")</td>
+                    <td style="padding: 8px 12px;">
+                        <RadzenSwitch Value="@profile.Enabled" Change="@((bool val) => ToggleEnabled(profile, val))" />
+                    </td>
+                    <td style="padding: 8px 12px; display: flex; gap: 4px;">
+                        <RadzenButton Text="Edit" ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" Click="@(() => OpenEdit(profile))" />
+                        <RadzenButton Text="Delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small" Click="@(() => ConfirmDelete(profile))" />
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<RadzenDialog Visible="@_showDialog" Title="@_dialogTitle">
+    @if (_editingProfile is not null)
+    {
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Name</RadzenText>
+                <RadzenTextBox @bind-Value="@_editingProfile.Name" Placeholder="Profile name" style="width: 100%;" />
+            </div>
+            <div>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Platform</RadzenText>
+                <RadzenDropDown @bind-Value="@_formPlatform" Data="@_platformOptions" TextProperty="Text" ValueProperty="Value" Placeholder="Select platform" style="width: 100%;" />
+            </div>
+            <div>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Keywords (comma separated)</RadzenText>
+                <RadzenTextBox @bind-Value="@_formKeywords" Placeholder="e.g. .NET, React, Azure" style="width: 100%;" />
+            </div>
+            <div>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Location (comma separated)</RadzenText>
+                <RadzenTextBox @bind-Value="@_formLocation" Placeholder="e.g. Remote, São Paulo" style="width: 100%;" />
+            </div>
+            <div>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Date Posted</RadzenText>
+                <RadzenDropDown @bind-Value="@_formDatePosted" Data="@_datePostedOptions" TextProperty="Text" ValueProperty="Value" Placeholder="Any" style="width: 100%;" />
+            </div>
+            <div>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Salary Min</RadzenText>
+                <RadzenNumeric @bind-Value="@_editingProfile.SalaryMin" Min="0" style="width: 100%;" />
+            </div>
+            <div>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Experience Level (comma separated)</RadzenText>
+                <RadzenTextBox @bind-Value="@_formExperienceLevel" Placeholder="e.g. Junior, Senior" style="width: 100%;" />
+            </div>
+            <div>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Job Types (comma separated)</RadzenText>
+                <RadzenTextBox @bind-Value="@_formJobTypes" Placeholder="e.g. Full-time, Contract" style="width: 100%;" />
+            </div>
+            <div>
+                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Exclude Terms (comma separated)</RadzenText>
+                <RadzenTextBox @bind-Value="@_formExcludeTerms" Placeholder="e.g. Java, PHP" style="width: 100%;" />
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px; justify-content: center;">
+                <RadzenCheckBox @bind-Value="@_editingProfile.EasyApplyOnly" Caption="Easy Apply Only" />
+                <RadzenCheckBox @bind-Value="@_editingProfile.RemoteOnly" Caption="Remote Only" />
+            </div>
+        </div>
+        <div style="margin-top: 24px; display: flex; gap: 8px; justify-content: flex-end;">
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Base" Click="@CloseDialog" />
+            <RadzenButton Text="Save" ButtonStyle="ButtonStyle.Primary" Click="@SaveProfile" />
+        </div>
+    }
+</RadzenDialog>
+
+<RadzenDialog Visible="@_showDeleteConfirm" Title="Confirm Delete">
+    <RadzenText>Are you sure you want to delete profile "@_deletingProfile?.Name"?</RadzenText>
+    <div style="margin-top: 24px; display: flex; gap: 8px; justify-content: flex-end;">
+        <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Base" Click="@(() => _showDeleteConfirm = false)" />
+        <RadzenButton Text="Delete" ButtonStyle="ButtonStyle.Danger" Click="@DeleteProfile" />
+    </div>
+</RadzenDialog>
+
+@code {
+    private List<SearchProfile> _profiles = [];
+    private SearchProfile? _editingProfile;
+    private SearchProfile? _deletingProfile;
+    private bool _showDialog;
+    private bool _showDeleteConfirm;
+    private string _dialogTitle = "";
+    private bool _isNew;
+
+    private string _formPlatform = "LinkedIn";
+    private string _formKeywords = "";
+    private string _formLocation = "";
+    private string _formDatePosted = "Any";
+    private string _formExperienceLevel = "";
+    private string _formJobTypes = "";
+    private string _formExcludeTerms = "";
+
+    private List<SelectOption> _platformOptions = [];
+    private List<SelectOption> _datePostedOptions = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _platformOptions = Enum.GetValues<PlatformType>()
+            .Cast<PlatformType>()
+            .Select(p => new SelectOption(p.ToString(), p.ToString()))
+            .ToList();
+
+        _datePostedOptions =
+        [
+            new("Any", "Any"),
+            new("Past 24 Hours", "Past 24 Hours"),
+            new("Past Week", "Past Week"),
+            new("Past Month", "Past Month"),
+        ];
+
+        await LoadProfiles();
+    }
+
+    private async Task LoadProfiles()
+    {
+        _profiles = (await ProfileRepo.GetAllAsync(default)).ToList();
+    }
+
+    private void OpenNew()
+    {
+        _editingProfile = new SearchProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "",
+            Enabled = true,
+            Keywords = [],
+            Location = [],
+            ExperienceLevel = [],
+            JobTypes = [],
+            ExcludeTerms = [],
+        };
+        _isNew = true;
+        _dialogTitle = "New Profile";
+        ResetForm();
+        _showDialog = true;
+    }
+
+    private void OpenEdit(SearchProfile profile)
+    {
+        _editingProfile = new SearchProfile
+        {
+            Id = profile.Id,
+            Name = profile.Name,
+            Enabled = profile.Enabled,
+            Platform = profile.Platform,
+            Keywords = [.. profile.Keywords],
+            Location = [.. profile.Location],
+            DatePosted = profile.DatePosted,
+            ExperienceLevel = [.. profile.ExperienceLevel],
+            JobTypes = [.. profile.JobTypes],
+            SalaryMin = profile.SalaryMin,
+            EasyApplyOnly = profile.EasyApplyOnly,
+            RemoteOnly = profile.RemoteOnly,
+            ExcludeTerms = [.. profile.ExcludeTerms],
+            ResumeFile = profile.ResumeFile,
+            CoverLetterTemplate = profile.CoverLetterTemplate,
+            DefaultAnswers = new Dictionary<string, string>(profile.DefaultAnswers),
+            CreatedAt = profile.CreatedAt,
+        };
+        _isNew = false;
+        _dialogTitle = $"Edit Profile - {profile.Name}";
+        LoadForm(profile);
+        _showDialog = true;
+    }
+
+    private void ResetForm()
+    {
+        _formPlatform = "LinkedIn";
+        _formKeywords = "";
+        _formLocation = "";
+        _formDatePosted = "Any";
+        _formExperienceLevel = "";
+        _formJobTypes = "";
+        _formExcludeTerms = "";
+    }
+
+    private void LoadForm(SearchProfile profile)
+    {
+        _formPlatform = profile.Platform.ToString();
+        _formKeywords = string.Join(", ", profile.Keywords);
+        _formLocation = string.Join(", ", profile.Location);
+        _formDatePosted = string.IsNullOrEmpty(profile.DatePosted) ? "Any" : profile.DatePosted;
+        _formExperienceLevel = string.Join(", ", profile.ExperienceLevel);
+        _formJobTypes = string.Join(", ", profile.JobTypes);
+        _formExcludeTerms = string.Join(", ", profile.ExcludeTerms);
+    }
+
+    private void SyncFormToProfile()
+    {
+        if (_editingProfile is null) return;
+        _editingProfile.Platform = Enum.Parse<PlatformType>(_formPlatform);
+        _editingProfile.Keywords = SplitCommas(_formKeywords);
+        _editingProfile.Location = SplitCommas(_formLocation);
+        _editingProfile.DatePosted = _formDatePosted == "Any" ? "" : _formDatePosted;
+        _editingProfile.ExperienceLevel = SplitCommas(_formExperienceLevel);
+        _editingProfile.JobTypes = SplitCommas(_formJobTypes);
+        _editingProfile.ExcludeTerms = SplitCommas(_formExcludeTerms);
+    }
+
+    private async Task SaveProfile()
+    {
+        if (_editingProfile is null) return;
+        SyncFormToProfile();
+        _editingProfile.UpdatedAt = DateTime.UtcNow;
+
+        if (_isNew)
+        {
+            _editingProfile.CreatedAt = DateTime.UtcNow;
+            await ProfileRepo.AddAsync(_editingProfile, default);
+        }
+        else
+        {
+            await ProfileRepo.UpdateAsync(_editingProfile, default);
+        }
+
+        _showDialog = false;
+        await LoadProfiles();
+    }
+
+    private async Task ToggleEnabled(SearchProfile profile, bool value)
+    {
+        profile.Enabled = value;
+        profile.UpdatedAt = DateTime.UtcNow;
+        await ProfileRepo.UpdateAsync(profile, default);
+    }
+
+    private void ConfirmDelete(SearchProfile profile)
+    {
+        _deletingProfile = profile;
+        _showDeleteConfirm = true;
+    }
+
+    private async Task DeleteProfile()
+    {
+        if (_deletingProfile is null) return;
+        await ProfileRepo.DeleteAsync(_deletingProfile.Id, default);
+        _showDeleteConfirm = false;
+        await LoadProfiles();
+    }
+
+    private void CloseDialog() => _showDialog = false;
+
+    private static List<string> SplitCommas(string text) =>
+        text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private record SelectOption(string Text, string Value);
+}

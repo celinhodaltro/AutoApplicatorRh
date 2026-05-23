@@ -1,0 +1,102 @@
+@page "/questions"
+@using Radzen
+@using Radzen.Blazor
+@inject IMediator Mediator
+@inject IQuestionRepository QuestionRepo
+
+<RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 24px;">Questions</RadzenText>
+
+<div style="display: flex; gap: 8px; margin-bottom: 16px;">
+    <RadzenButton Text="All" Size="ButtonSize.Small"
+        ButtonStyle="@(!_showUnansweredOnly ? ButtonStyle.Primary : ButtonStyle.Base)"
+        Click="@(() => { _showUnansweredOnly = false; ApplyFilter(); })" />
+    <RadzenButton Text="Unanswered" Size="ButtonSize.Small"
+        ButtonStyle="@(_showUnansweredOnly ? ButtonStyle.Primary : ButtonStyle.Base)"
+        Click="@(() => { _showUnansweredOnly = true; ApplyFilter(); })" />
+</div>
+
+@foreach (var question in _filteredQuestions)
+{
+    <QuestionCard Question="@question">
+        <AnswerInput>
+            @switch (question.FieldType)
+            {
+                case QuestionFieldType.Select:
+                case QuestionFieldType.Radio:
+                    <RadzenDropDown @bind-Value="@_answers[question.Id]"
+                        Data="@question.Options" Placeholder="Select answer" style="width: 100%;" />
+                    break;
+                case QuestionFieldType.Textarea:
+                    <RadzenTextArea @bind-Value="@_answers[question.Id]" Rows="3" Placeholder="Type your answer..." style="width: 100%;" />
+                    break;
+                case QuestionFieldType.Checkbox:
+                    <RadzenCheckBox @bind-Value="@_checkboxAnswers[question.Id]" Caption="Check if applicable" />
+                    break;
+                case QuestionFieldType.File:
+                    <RadzenText TextStyle="TextStyle.Body2" style="color: var(--rz-text-secondary);">File upload not available</RadzenText>
+                    break;
+                default:
+                    <RadzenTextBox @bind-Value="@_answers[question.Id]" Placeholder="Type your answer..." style="width: 100%;" />
+                    break;
+            }
+        </AnswerInput>
+        <ChildContent>
+            <RadzenButton Text="Save Answer" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
+                Click="@(() => SaveAnswer(question))"
+                Disabled="@string.IsNullOrEmpty(_answers.GetValueOrDefault(question.Id))" />
+            <RadzenButton Text="Delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                Click="@(() => DeleteQuestion(question))" />
+        </ChildContent>
+    </QuestionCard>
+}
+
+@if (_filteredQuestions.Count == 0)
+{
+    <div style="text-align: center; padding: 48px;">
+        <RadzenText TextStyle="TextStyle.Body1" style="color: var(--rz-text-secondary);">No questions found.</RadzenText>
+    </div>
+}
+
+@code {
+    private List<CollectedQuestion> _allQuestions = [];
+    private List<CollectedQuestion> _filteredQuestions = [];
+    private bool _showUnansweredOnly;
+    private Dictionary<Guid, string> _answers = [];
+    private Dictionary<Guid, bool> _checkboxAnswers = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadQuestions();
+    }
+
+    private async Task LoadQuestions()
+    {
+        _allQuestions = await Mediator.Send(new GetQuestionsQuery());
+        _answers = _allQuestions.ToDictionary(q => q.Id, q => q.Answer);
+        _checkboxAnswers = _allQuestions.ToDictionary(q => q.Id, q => !string.IsNullOrEmpty(q.Answer));
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        _filteredQuestions = _showUnansweredOnly
+            ? _allQuestions.Where(q => string.IsNullOrEmpty(q.Answer)).ToList()
+            : [.. _allQuestions];
+    }
+
+    private async Task SaveAnswer(CollectedQuestion question)
+    {
+        var answer = question.FieldType == QuestionFieldType.Checkbox
+            ? (_checkboxAnswers.GetValueOrDefault(question.Id) ? "Yes" : "")
+            : (_answers.GetValueOrDefault(question.Id) ?? "");
+
+        await Mediator.Send(new SetQuestionAnswerCommand(question.Id, answer));
+        await LoadQuestions();
+    }
+
+    private async Task DeleteQuestion(CollectedQuestion question)
+    {
+        await QuestionRepo.DeleteAsync(question.Id, default);
+        await LoadQuestions();
+    }
+}
