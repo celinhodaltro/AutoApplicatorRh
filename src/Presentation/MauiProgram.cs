@@ -1,7 +1,9 @@
 ﻿using AutoApplicator.Application;
 using AutoApplicator.Infrastructure;
-using Radzen;
 using Microsoft.Extensions.Logging;
+using Radzen;
+using Serilog;
+using Serilog.Events;
 
 namespace AutoApplicator.App;
 
@@ -9,6 +11,32 @@ public static class MauiProgram
 {
     public static MauiApp CreateMauiApp()
     {
+        EnsurePlaywrightBrowsers();
+
+        var logsBase = Path.Combine(FileSystem.AppDataDirectory, "Logs");
+        var servicesLog = Path.Combine(logsBase, "Services", "log-.txt");
+        var errorLog = Path.Combine(logsBase, "Error", "log-.txt");
+
+        Directory.CreateDirectory(Path.GetDirectoryName(servicesLog)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(errorLog)!);
+
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+            .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+            .WriteTo.File(
+                servicesLog,
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 7,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Properties:j}{NewLine}")
+            .WriteTo.File(
+                errorLog,
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 30,
+                restrictedToMinimumLevel: LogEventLevel.Error,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}{NewLine}{Properties:j}{NewLine}")
+            .CreateLogger();
+
         var builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
@@ -27,9 +55,36 @@ public static class MauiProgram
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
-        builder.Logging.AddDebug();
 #endif
 
-        return builder.Build();
+        builder.Logging.ClearProviders();
+        builder.Logging.AddSerilog(Log.Logger, dispose: true);
+
+        var app = builder.Build();
+
+        app.Services.InitializeDatabase();
+
+        Log.Information("Application started. Database: {DbPath}. Logs: {LogsPath}", dbPath, logsBase);
+
+        return app;
+    }
+
+    private static void EnsurePlaywrightBrowsers()
+    {
+        var browserDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ms-playwright");
+
+        if (Directory.Exists(browserDir))
+        {
+            var hasBrowser = Directory.GetDirectories(browserDir)
+                .Any(dir => File.Exists(Path.Combine(dir, "chrome-win64", "chrome.exe")));
+
+            if (hasBrowser) return;
+        }
+
+        Console.WriteLine("Installing Playwright browsers...");
+        Microsoft.Playwright.Program.Main(["install"]);
+        Console.WriteLine("Playwright browsers installed.");
     }
 }

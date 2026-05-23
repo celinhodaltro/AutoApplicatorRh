@@ -1,0 +1,77 @@
+@using AutoApplicator.Infrastructure.Services
+@inject AutomationService AutomationService
+
+<div class="topbar">
+    <div class="topbar-left">
+        <button class="menu-toggle" @onclick="@(async () => await OnToggleSidebar.InvokeAsync())" title="Toggle sidebar">
+            <span class="hamburger">☰</span>
+        </button>
+        <div class="app-brand">
+            <span class="app-logo">⚡</span>
+            <span class="app-name">AutoApplicator</span>
+        </div>
+    </div>
+    <div class="topbar-center">
+        @if (AutomationService.IsRunning)
+        {
+            <div class="automation-status">
+                <div class="status-spinner"></div>
+                <span class="status-text">
+                    @AutomationService.CurrentStatus.Progress @AutomationService.CurrentStatus.Message
+                </span>
+            </div>
+        }
+    </div>
+    <div class="topbar-right">
+        @if (AutomationService.IsRunning)
+        {
+            <button class="topbar-btn stop-btn" @onclick="StopAutomation">⏹ Stop</button>
+        }
+        else
+        {
+            <button class="topbar-btn start-btn" @onclick="StartAutomation">▶ Start</button>
+        }
+        <NotificationBell />
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnToggleSidebar { get; set; }
+
+    private bool _subscribed;
+
+    protected override void OnInitialized()
+    {
+        if (!_subscribed)
+        {
+            AutomationService.StatusChanged += OnAutomationStatusChanged;
+            _subscribed = true;
+        }
+    }
+
+    private async void OnAutomationStatusChanged()
+    {
+        try { await InvokeAsync(StateHasChanged); }
+        catch { }
+    }
+
+    private async Task StartAutomation()
+    {
+        var globalEasyApply = Preferences.Get("global_easy_apply", false);
+        await Task.Run(() => AutomationService.StartAsync(globalEasyApply));
+    }
+
+    private void StopAutomation()
+    {
+        AutomationService.Stop();
+    }
+
+    public void Dispose()
+    {
+        if (_subscribed)
+        {
+            AutomationService.StatusChanged -= OnAutomationStatusChanged;
+            _subscribed = false;
+        }
+    }
+}

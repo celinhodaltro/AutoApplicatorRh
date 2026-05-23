@@ -1,12 +1,4 @@
 <Solution>
-  <Configurations>
-    <Configuration Platform="AnyCPU" Name="Debug" />
-    <Configuration Platform="AnyCPU" Name="Release" />
-    <Configuration Platform="x64" Name="Debug" />
-    <Configuration Platform="x64" Name="Release" />
-    <Configuration Platform="ARM64" Name="Debug" />
-    <Configuration Platform="ARM64" Name="Release" />
-  </Configurations>
 
   <Folder Name="/src/" />
   <Folder Name="/src/Core/">
@@ -16,6 +8,8 @@
     <Folder Name="/src/Core/Domain/">
       <Project Path="src/Core/Domain/AutoApplicator.Domain.csproj" />
     </Folder>
+    <Project Path="src/Core/Application/AutoApplicator.Application.csproj" />
+    <Project Path="src/Core/Domain/AutoApplicator.Domain.csproj" />
   </Folder>
   <Folder Name="/src/Infrastructure/">
     <Project Path="src/Infrastructure/AutoApplicator.Infrastructure.csproj" />

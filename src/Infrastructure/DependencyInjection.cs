@@ -1,7 +1,10 @@
+using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Interfaces;
+using AutoApplicator.Infrastructure.Automation.Platforms;
 using AutoApplicator.Infrastructure.Persistence;
+using AutoApplicator.Infrastructure.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 namespace AutoApplicator.Infrastructure;
 
@@ -9,15 +12,24 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, string connectionString)
     {
-        DbInitializer.Initialize(connectionString);
+        services.AddDbContext<AppDbContext>(options =>
+            options.UseSqlite(connectionString));
 
-        services.AddScoped<IProfileRepository>(sp =>
-            new ProfileRepository(connectionString, sp.GetRequiredService<ILogger<ProfileRepository>>()));
-        services.AddScoped<IJobRepository>(sp =>
-            new JobRepository(connectionString, sp.GetRequiredService<ILogger<JobRepository>>()));
-        services.AddScoped<IQuestionRepository>(sp =>
-            new QuestionRepository(connectionString, sp.GetRequiredService<ILogger<QuestionRepository>>()));
+        services.AddScoped<IProfileRepository, ProfileRepository>();
+        services.AddScoped<IJobRepository, JobRepository>();
+        services.AddScoped<IQuestionRepository, QuestionRepository>();
+        services.AddSingleton<PlaywrightService>();
+        services.AddSingleton<IPlaywrightService>(sp => sp.GetRequiredService<PlaywrightService>());
+        services.AddSingleton<AutomationService>();
+        services.AddSingleton<NotificationService>();
+        services.AddSingleton<PlatformAdapterFactory>();
 
         return services;
+    }
+
+    public static void InitializeDatabase(this IServiceProvider serviceProvider)
+    {
+        using var context = serviceProvider.GetRequiredService<AppDbContext>();
+        context.Database.EnsureCreated();
     }
 }

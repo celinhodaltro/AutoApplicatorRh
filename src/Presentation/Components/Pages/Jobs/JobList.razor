@@ -1,0 +1,119 @@
+@page "/jobs"
+@using Radzen
+@using Radzen.Blazor
+
+<div class="jobs-page">
+    <div class="page-header">
+        <div>
+            <RadzenText TextStyle="TextStyle.H3" class="page-title">Jobs</RadzenText>
+            <RadzenText TextStyle="TextStyle.Body2" class="page-subtitle">Manage and review your collected job listings</RadzenText>
+        </div>
+        <div class="header-summary">
+            <span class="summary-badge">@_filteredJobs.Count shown</span>
+            <span class="summary-badge muted">@_allJobs.Count total</span>
+        </div>
+    </div>
+
+    <div class="filter-bar">
+        <RadzenButton Text="All" Size="ButtonSize.ExtraSmall" ButtonStyle="@(_statusFilter is null ? ButtonStyle.Primary : ButtonStyle.Base)" Click="@(() => FilterByStatus(null))" />
+        @foreach (var status in Enum.GetValues<JobStatus>())
+        {
+            <RadzenButton Text="@status.ToString()" Size="ButtonSize.ExtraSmall"
+                ButtonStyle="@(_statusFilter == status ? ButtonStyle.Primary : ButtonStyle.Base)"
+                Click="@(() => FilterByStatus(status))" />
+        }
+    </div>
+
+    <div class="action-bar">
+        <div class="action-left">
+            <label class="checkbox-label">
+                <input type="checkbox" checked="@_selectAll" @onchange="@ToggleSelectAll" class="checkbox-input" />
+                <span class="checkbox-custom"></span>
+                <span>Select all @(_selectedIds.Count > 0 ? $"({_selectedIds.Count})" : "")</span>
+            </label>
+        </div>
+        <div class="action-right">
+            <RadzenButton Text="Approve" ButtonStyle="ButtonStyle.Success" Size="ButtonSize.ExtraSmall"
+                Disabled="@(_selectedIds.Count == 0)" Click="@BatchApprove" />
+            <RadzenButton Text="Reject" ButtonStyle="ButtonStyle.Warning" Size="ButtonSize.ExtraSmall"
+                Disabled="@(_selectedIds.Count == 0)" Click="@BatchReject" />
+            <RadzenButton Text="Delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.ExtraSmall"
+                Disabled="@(_selectedIds.Count == 0)" Click="@BatchDelete" />
+        </div>
+    </div>
+
+    <div class="table-container">
+        <table class="jobs-table">
+            <thead>
+                <tr>
+                    <th class="col-check"></th>
+                    <th class="col-title">Title</th>
+                    <th class="col-company">Company</th>
+                    <th class="col-platform">Platform</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-match">Match</th>
+                    <th class="col-date">Posted</th>
+                    <th class="col-actions">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_filteredJobs.Count == 0)
+                {
+                    <tr>
+                        <td colspan="8">
+                            <div class="empty-state">
+                                <span class="empty-icon">📭</span>
+                                <span>No jobs found</span>
+                            </div>
+                        </td>
+                    </tr>
+                }
+                @foreach (var job in _filteredJobs)
+                {
+                    <tr class="job-row @(_selectedIds.Contains(job.Id) ? "selected" : "")">
+                        <td class="col-check">
+                            <label class="checkbox-label">
+                                <input type="checkbox" checked="@_selectedIds.Contains(job.Id)"
+                                    @onchange="@((ChangeEventArgs e) => ToggleSelection(job.Id, (bool)(e.Value ?? false)))" class="checkbox-input" />
+                                <span class="checkbox-custom"></span>
+                            </label>
+                        </td>
+                        <td class="col-title">
+                            <a href="/jobs/@job.Id" class="job-title-link">@job.Title</a>
+                        </td>
+                        <td class="col-company">
+                            <span class="company-name">@job.Company</span>
+                            @if (!string.IsNullOrEmpty(job.Location))
+                            {
+                                <span class="company-location">@job.Location</span>
+                            }
+                        </td>
+                        <td class="col-platform"><span class="platform-tag">@job.Platform</span></td>
+                        <td class="col-status"><RadzenBadge BadgeStyle="@GetStatusBadge(job.Status)" class="status-badge">@job.Status</RadzenBadge></td>
+                        <td class="col-match">
+                            @if (job.MatchScore.HasValue)
+                            {
+                                <span class="match-score">@job.MatchScore<small>%</small></span>
+                            }
+                            else
+                            {
+                                <span class="match-none">—</span>
+                            }
+                        </td>
+                        <td class="col-date"><span class="posted-date">@job.PostedDate.ToShortDateString()</span></td>
+                        <td class="col-actions">
+                            <div class="action-buttons">
+                                <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Base" Click="@(() => Navigation.NavigateTo($"/jobs/{job.Id}"))" title="View details">👁️</RadzenButton>
+                                @if (job.Status is JobStatus.New or JobStatus.Reviewed)
+                                {
+                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Success" Click="@(() => ApproveSingle(job))" title="Approve">✅</RadzenButton>
+                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Warning" Click="@(() => RejectSingle(job))" title="Reject">❌</RadzenButton>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

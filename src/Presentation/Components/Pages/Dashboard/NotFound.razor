@@ -1,0 +1,19 @@
+﻿@page "/not-found"
+@layout MainLayout
+@using Radzen
+@using Radzen.Blazor
+@inject NavigationManager Navigation
+
+<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 0; text-align: center;">
+    <RadzenText TextStyle="TextStyle.H1" style="font-size: 64px; font-weight: 800; color: var(--rz-text-tertiary); margin-bottom: 8px;">404</RadzenText>
+    <RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 8px;">Not Found</RadzenText>
+    <RadzenText TextStyle="TextStyle.Body1" style="color: var(--rz-text-secondary); margin-bottom: 24px;">
+        Sorry, the content you are looking for does not exist.
+    </RadzenText>
+    <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@(() => Navigation.NavigateTo("/"))">
+        <span style="display: flex; align-items: center; gap: 6px;">
+            <span>🏠</span>
+            <span>Go to Dashboard</span>
+        </span>
+    </RadzenButton>
+</div>

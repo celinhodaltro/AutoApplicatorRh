@@ -1,0 +1,144 @@
+.topbar {
+    display: flex;
+    align-items: center;
+    height: 52px;
+    padding: 0 16px;
+    background: #ffffff;
+    border-bottom: 1px solid #e8e8e8;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    gap: 12px;
+    z-index: 50;
+    position: relative;
+}
+
+.topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.menu-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 18px;
+    color: #555;
+    display: flex;
+    align-items: center;
+    transition: background 0.15s;
+}
+
+.menu-toggle:hover {
+    background: #f0f0f0;
+}
+
+.hamburger {
+    line-height: 1;
+}
+
+.app-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-logo {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.app-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #333;
+    white-space: nowrap;
+}
+
+.topbar-center {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    min-width: 0;
+}
+
+.automation-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    background: #fff8e1;
+    border-radius: 20px;
+    font-size: 12px;
+    color: #e65100;
+    max-width: 100%;
+}
+
+.status-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid #ff9800;
+    border-top: 2px solid transparent;
+    border-radius: 50%;
+    animation: tspin 0.6s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes tspin {
+    to { transform: rotate(360deg); }
+}
+
+.status-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.topbar-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.start-btn {
+    background: #667eea;
+    color: white;
+}
+
+.start-btn:hover {
+    background: #5a6fd6;
+}
+
+.start-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.stop-btn {
+    background: #f44336;
+    color: white;
+}
+
+.stop-btn:hover {
+    background: #d32f2f;
+}
+
+.topbar-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

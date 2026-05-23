@@ -1,8 +1,8 @@
 using System.Text.RegularExpressions;
-using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
 using AutoApplicator.Domain.Interfaces;
+using AutoApplicator.Application.Interfaces;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.Logging;
@@ -86,7 +86,6 @@ public sealed class SearchJobsCommandHandler(
         logger.LogInformation("Navigating to {SearchUrl}", searchUrl);
 
         await playwrightService.NavigateAsync(searchUrl);
-
         await Task.Delay(2000, ct);
 
         var html = await playwrightService.GetHtmlAsync();
@@ -140,12 +139,10 @@ public sealed class SearchJobsCommandHandler(
             var linkMatch = Regex.Match(card, "href=\"(https?://[^\"]+?)\"", RegexOptions.IgnoreCase);
             var url = linkMatch.Success ? linkMatch.Groups[1].Value : "";
 
-            var externalId = Guid.NewGuid().ToString("N")[..12];
-
             var job = new JobListing
             {
                 Id = Guid.NewGuid(),
-                ExternalId = externalId,
+                ExternalId = Guid.NewGuid().ToString("N")[..12],
                 Platform = profile.Platform,
                 ProfileId = profile.Id,
                 Url = url,
@@ -173,8 +170,7 @@ public sealed class SearchJobsCommandHandler(
         var match = Regex.Match(html, pattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
         if (match.Success)
         {
-            var text = match.Groups[1].Value;
-            text = Regex.Replace(text, "<[^>]+>", "");
+            var text = Regex.Replace(match.Groups[1].Value, "<[^>]+>", "");
             return System.Net.WebUtility.HtmlDecode(text.Trim());
         }
         return null;

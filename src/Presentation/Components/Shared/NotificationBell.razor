@@ -1,0 +1,50 @@
+<div class="notification-bell" @onclick="TogglePanel" @onclick:stopPropagation="true">
+    <button class="bell-button" title="Notifications">
+        <span class="bell-icon">🔔</span>
+        @if (NotificationService.UnreadCount > 0)
+        {
+            <span class="badge">@NotificationService.UnreadCount</span>
+        }
+    </button>
+
+    @if (_showPanel)
+    {
+        <div class="notification-panel" @onclick:stopPropagation="true">
+            <div class="panel-header">
+                <span class="panel-title">Notifications</span>
+                <div class="panel-actions">
+                    @if (NotificationService.Notifications.Any(n => !n.IsRead))
+                    {
+                        <button class="action-btn" @onclick="MarkAllRead">Mark all read</button>
+                    }
+                    <button class="action-btn" @onclick="ClearAll">Clear</button>
+                    <button class="action-btn close-btn" @onclick="ClosePanel">✕</button>
+                </div>
+            </div>
+            <div class="panel-body">
+                @if (NotificationService.Notifications.Count == 0)
+                {
+                    <div class="empty-state">No notifications</div>
+                }
+                else
+                {
+                    @foreach (var notification in NotificationService.Notifications)
+                    {
+                        <div class="notification-item @(notification.IsRead ? "read" : "unread")" @onclick="() => MarkRead(notification.Id)">
+                            <div class="item-icon">@GetIcon(notification.Type)</div>
+                            <div class="item-content">
+                                <div class="item-title">@notification.Title</div>
+                                <div class="item-message">@notification.Message</div>
+                                <div class="item-time">@FormatTime(notification.Timestamp)</div>
+                            </div>
+                            @if (!string.IsNullOrEmpty(notification.ActionLabel) && !string.IsNullOrEmpty(notification.ActionUrl))
+                            {
+                                <a class="item-action" href="@notification.ActionUrl" @onclick:stopPropagation="true">@notification.ActionLabel</a>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    }
+</div>

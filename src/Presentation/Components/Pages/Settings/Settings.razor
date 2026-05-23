@@ -1,0 +1,106 @@
+@page "/settings"
+@using Radzen
+@using Radzen.Blazor
+
+<RadzenText TextStyle="TextStyle.H4" class="page-title">Settings</RadzenText>
+
+<RadzenTabs>
+    <RadzenTabsItem Text="Accounts">
+        <div class="settings-section">
+            <RadzenText TextStyle="TextStyle.Body2" class="section-description">
+                Log in to each platform so AutoApplicator can search and apply on your behalf.
+                Click a button below, complete the login in your browser, then come back.
+            </RadzenText>
+            <div class="login-cards">
+                <div class="login-card linkedin" @onclick="() => OpenLogin(PlatformType.LinkedIn)">
+                    <div class="login-card-icon">
+                        <span class="platform-icon">💼</span>
+                    </div>
+                    <div class="login-card-info">
+                        <RadzenText TextStyle="TextStyle.H6" class="platform-name">LinkedIn</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body2" class="platform-url">linkedin.com/login</RadzenText>
+                    </div>
+                    <RadzenButton ButtonStyle="ButtonStyle.Primary" class="login-btn">
+                        <span class="btn-content">🔑 Log In</span>
+                    </RadzenButton>
+                </div>
+                <div class="login-card indeed" @onclick="() => OpenLogin(PlatformType.Indeed)">
+                    <div class="login-card-icon">
+                        <span class="platform-icon">🔍</span>
+                    </div>
+                    <div class="login-card-info">
+                        <RadzenText TextStyle="TextStyle.H6" class="platform-name">Indeed</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body2" class="platform-url">secure.indeed.com/auth</RadzenText>
+                    </div>
+                    <RadzenButton ButtonStyle="ButtonStyle.Primary" class="login-btn">
+                        <span class="btn-content">🔑 Log In</span>
+                    </RadzenButton>
+                </div>
+                <div class="login-card gupy" @onclick="() => OpenLogin(PlatformType.Gupy)">
+                    <div class="login-card-icon">
+                        <span class="platform-icon">🌟</span>
+                    </div>
+                    <div class="login-card-info">
+                        <RadzenText TextStyle="TextStyle.H6" class="platform-name">Gupy</RadzenText>
+                        <RadzenText TextStyle="TextStyle.Body2" class="platform-url">portal.gupy.io/login</RadzenText>
+                    </div>
+                    <RadzenButton ButtonStyle="ButtonStyle.Primary" class="login-btn">
+                        <span class="btn-content">🔑 Log In</span>
+                    </RadzenButton>
+                </div>
+            </div>
+        </div>
+    </RadzenTabsItem>
+    <RadzenTabsItem Text="Automation">
+        <div class="settings-section" style="max-width: 500px;">
+            <div class="field-group">
+                <RadzenCheckBox @bind-Value="@_globalEasyApply" Caption="Easy Apply only — skip jobs without Easy Apply" />
+            </div>
+            <div class="field-group">
+                <RadzenText TextStyle="TextStyle.Body2" class="field-label">Delay between actions (ms)</RadzenText>
+                <RadzenNumeric @bind-Value="@_actionDelay" Min="100" Max="30000" Step="100" class="field-input" />
+            </div>
+            <div class="field-group">
+                <RadzenText TextStyle="TextStyle.Body2" class="field-label">Cooldown between profiles (s)</RadzenText>
+                <RadzenNumeric @bind-Value="@_profileCooldown" Min="0" Max="3600" Step="10" class="field-input" />
+            </div>
+            <div class="field-group">
+                <RadzenText TextStyle="TextStyle.Body2" class="field-label">Max applications per session</RadzenText>
+                <RadzenNumeric @bind-Value="@_maxApplications" Min="1" Max="500" Step="1" class="field-input" />
+            </div>
+            <div class="field-group">
+                <RadzenCheckBox @bind-Value="@_headlessMode" Caption="Run browser in headless mode" />
+            </div>
+        </div>
+    </RadzenTabsItem>
+    <RadzenTabsItem Text="Logs">
+        <div class="log-controls">
+            <RadzenButton Size="ButtonSize.Small" ButtonStyle="@(_logType == LogType.Services ? ButtonStyle.Primary : ButtonStyle.Base)" Click="@(() => SwitchLogs(LogType.Services))">Services</RadzenButton>
+            <RadzenButton Size="ButtonSize.Small" ButtonStyle="@(_logType == LogType.Error ? ButtonStyle.Primary : ButtonStyle.Base)" Click="@(() => SwitchLogs(LogType.Error))">Error</RadzenButton>
+            <div class="log-controls-spacer"></div>
+            <RadzenButton Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Base" Click="@RefreshLogs">🔄 Refresh</RadzenButton>
+            <RadzenButton Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Base" Click="@OpenLogsFolder">📁 Open Folder</RadzenButton>
+        </div>
+        <div class="log-viewer">
+            @if (_loadingLogs)
+            {
+                <div class="log-empty">Loading log entries...</div>
+            }
+            else if (_logLines.Count == 0)
+            {
+                <div class="log-empty">No log entries found in @(_logType == LogType.Services ? "Services" : "Error") log.</div>
+            }
+            else
+            {
+                @foreach (var line in _logLines)
+                {
+                    var cssClass = GetLogLineClass(line);
+                    <div class="@cssClass">@line</div>
+                }
+            }
+        </div>
+        <div class="log-path">
+            <RadzenText TextStyle="TextStyle.Caption">Location: @_currentLogPath</RadzenText>
+        </div>
+    </RadzenTabsItem>
+</RadzenTabs>

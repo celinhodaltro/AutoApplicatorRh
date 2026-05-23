@@ -48,6 +48,7 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
                 Headless = false,
                 Args =
                 [
+                    "--start-maximized",
                     "--disable-blink-features=AutomationControlled",
                     "--disable-features=IsolateOrigins,site-per-process",
                     "--disable-web-security",
@@ -221,6 +222,11 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
             _logger.LogError(ex, "Failed to save screenshot to {Path}", path);
             throw;
         }
+    }
+
+    public IPage? GetPage()
+    {
+        return _page;
     }
 
     private async Task EnsureInitializedAsync()

@@ -1,56 +1,16 @@
-@using Radzen
-@using Radzen.Blazor
-@inject DialogService DialogService
-@inject IProfileRepository ProfileRepo
+﻿using AutoApplicator.Domain.Entities;
+using AutoApplicator.Domain.Enums;
+using AutoApplicator.Domain.Interfaces;
+using Microsoft.AspNetCore.Components;
+using Radzen;
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-    <div>
-        <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Name</RadzenText>
-        <RadzenTextBox @bind-Value="@_editingProfile.Name" Placeholder="Profile name" style="width: 100%;" />
-    </div>
-    <div>
-        <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Platform</RadzenText>
-        <RadzenDropDown @bind-Value="@_formPlatform" Data="@_platformOptions" TextProperty="Text" ValueProperty="Value" Placeholder="Select platform" style="width: 100%;" />
-    </div>
-    <div>
-        <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Keywords (comma separated)</RadzenText>
-        <RadzenTextBox @bind-Value="@_formKeywords" Placeholder="e.g. .NET, React, Azure" style="width: 100%;" />
-    </div>
-    <div>
-        <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Location (comma separated)</RadzenText>
-        <RadzenTextBox @bind-Value="@_formLocation" Placeholder="e.g. Remote, São Paulo" style="width: 100%;" />
-    </div>
-    <div>
-        <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Date Posted</RadzenText>
-        <RadzenDropDown @bind-Value="@_formDatePosted" Data="@_datePostedOptions" TextProperty="Text" ValueProperty="Value" Placeholder="Any" style="width: 100%;" />
-    </div>
-    <div>
-        <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Salary Min</RadzenText>
-        <RadzenNumeric @bind-Value="@_editingProfile.SalaryMin" Min="0" style="width: 100%;" />
-    </div>
-    <div>
-        <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Experience Level (comma separated)</RadzenText>
-        <RadzenTextBox @bind-Value="@_formExperienceLevel" Placeholder="e.g. Junior, Senior" style="width: 100%;" />
-    </div>
-    <div>
-        <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Job Types (comma separated)</RadzenText>
-        <RadzenTextBox @bind-Value="@_formJobTypes" Placeholder="e.g. Full-time, Contract" style="width: 100%;" />
-    </div>
-    <div>
-        <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Exclude Terms (comma separated)</RadzenText>
-        <RadzenTextBox @bind-Value="@_formExcludeTerms" Placeholder="e.g. Java, PHP" style="width: 100%;" />
-    </div>
-    <div style="display: flex; flex-direction: column; gap: 8px; justify-content: center;">
-        <RadzenCheckBox @bind-Value="@_editingProfile.EasyApplyOnly" Caption="Easy Apply Only" />
-        <RadzenCheckBox @bind-Value="@_editingProfile.RemoteOnly" Caption="Remote Only" />
-    </div>
-</div>
-<div style="margin-top: 24px; display: flex; gap: 8px; justify-content: flex-end;">
-    <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Base" Click="@Cancel" />
-    <RadzenButton Text="Save" ButtonStyle="ButtonStyle.Primary" Click="@Save" />
-</div>
+namespace AutoApplicator.App.Components.Pages.Profiles;
 
-@code {
+public partial class ProfileEditDialog
+{
+    [Inject] private DialogService DialogService { get; set; } = default!;
+    [Inject] private IProfileRepository ProfileRepo { get; set; } = default!;
+
     [Parameter] public SearchProfile Profile { get; set; } = default!;
     [Parameter] public bool IsNew { get; set; }
 
@@ -145,10 +105,7 @@
         DialogService.Close(true);
     }
 
-    private void Cancel()
-    {
-        DialogService.Close(false);
-    }
+    private void Cancel() => DialogService.Close(false);
 
     private static List<string> SplitCommas(string text) =>
         text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
