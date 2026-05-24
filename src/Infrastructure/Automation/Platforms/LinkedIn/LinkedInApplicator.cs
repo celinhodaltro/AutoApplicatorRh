@@ -314,7 +314,22 @@ public sealed class LinkedInApplicator
             var required = await input.GetAttributeAsync("required") is not null;
             var value = await input.InputValueAsync();
             var id = await input.GetAttributeAsync("id") ?? "";
-            fields.Add(new FormField(FormFieldType.Text, label, id, required, value));
+
+            // Verificar se é um campo typeahead (autocomplete)
+            var isTypeahead = false;
+            try
+            {
+                var parentClasses = await input.EvaluateAsync<string>(@"(el) => {
+                    const parent = el.closest('.search-basic-typeahead, .search-vertical-typeahead, [data-test-single-typeahead-entity-form-component]');
+                    return parent ? 'typeahead' : '';
+                }");
+                isTypeahead = parentClasses == "typeahead";
+            }
+            catch { }
+
+            fields.Add(new FormField(
+                isTypeahead ? FormFieldType.Typeahead : FormFieldType.Text,
+                label, id, required, value));
         }
     }
 
@@ -476,6 +491,7 @@ public sealed class LinkedInApplicator
             FormFieldType.Select => QuestionFieldType.Select,
             FormFieldType.Radio => QuestionFieldType.Radio,
             FormFieldType.Checkbox => QuestionFieldType.Checkbox,
+            FormFieldType.Typeahead => QuestionFieldType.Textarea,
             _ => QuestionFieldType.Textarea
         };
     }
@@ -553,6 +569,23 @@ public sealed class LinkedInApplicator
                 {
                     if (!string.IsNullOrEmpty(selector))
                         await page.Locator(selector).CheckAsync();
+                }
+                break;
+
+            case FormFieldType.Typeahead:
+                if (!string.IsNullOrEmpty(selector))
+                {
+                    await page.Locator(selector).ClickAsync();
+                    await _behavior.DelayAsync(300, 500);
+                    await page.Locator(selector).FillAsync(string.Empty);
+                    await _behavior.DelayAsync(200, 400);
+                    await page.Locator(selector).PressSequentiallyAsync(answer, new() { Delay = 50 });
+                    await _behavior.DelayAsync(800, 1200);
+                    await page.Locator(selector).PressAsync("ArrowDown");
+                    await _behavior.DelayAsync(100, 200);
+                    await page.Locator(selector).PressAsync("Enter");
+                    await _behavior.DelayAsync(300, 500);
+                    await page.Locator(selector).PressAsync("Tab");
                 }
                 break;
         }
@@ -821,7 +854,7 @@ public sealed class LinkedInApplicator
 
 public sealed record FormField(FormFieldType Type, string Label, string ElementId, bool Required, string? CurrentValue = null, List<string>? Options = null);
 
-public enum FormFieldType { Text, Textarea, Select, Radio, Checkbox, File }
+public enum FormFieldType { Text, Textarea, Select, Radio, Checkbox, File, Typeahead }
 
 public enum StepResult { Next, Review, Submit, Error }
 

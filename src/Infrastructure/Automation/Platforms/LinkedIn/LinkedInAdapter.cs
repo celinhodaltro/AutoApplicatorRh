@@ -233,8 +233,61 @@ public sealed class LinkedInAdapter : IPlatformAdapter
     public async Task NavigateToPageAsync(IPage page, SearchProfile profile, int pageNum)
     {
         var url = BuildSearchUrl(profile, pageNum);
-        await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-        await Task.Delay(2000);
+        _logger.LogInformation("Navigating to page {PageNum}: {Url}", pageNum, url);
+        
+        await page.GotoAsync(url, new() 
+        { 
+            WaitUntil = WaitUntilState.DOMContentLoaded,
+            Timeout = 30000 
+        });
+        
+        // Wait for job cards to actually render (lazy loading)
+        var cardSelectors = new[]
+        {
+            ".job-card-container",
+            ".jobs-search-results__list-item",
+            "li[data-occludable-job-id]",
+            ".scaffold-layout__list-item"
+        };
+        
+        var cardsFound = false;
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            foreach (var sel in cardSelectors)
+            {
+                try
+                {
+                    var count = await page.Locator(sel).CountAsync();
+                    if (count > 0)
+                    {
+                        _logger.LogInformation("Page {PageNum}: Found {Count} job cards via '{Selector}'", pageNum, count, sel);
+                        cardsFound = true;
+                        break;
+                    }
+                }
+                catch { }
+            }
+            
+            if (cardsFound) break;
+            
+            _logger.LogInformation("Page {PageNum}: Waiting for job cards to load (attempt {Attempt})...", pageNum, attempt + 1);
+            await Task.Delay(2000);
+        }
+        
+        if (!cardsFound)
+        {
+            _logger.LogWarning("Page {PageNum}: No job cards found after multiple attempts", pageNum);
+        }
+        
+        // Extra scroll to trigger lazy loading
+        try
+        {
+            await page.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight)");
+            await Task.Delay(1000);
+            await page.EvaluateAsync("window.scrollTo(0, 0)");
+            await Task.Delay(500);
+        }
+        catch { }
     }
 
     public async Task<JobDetail> ExtractJobDetailsAsync(IPage page, string url)

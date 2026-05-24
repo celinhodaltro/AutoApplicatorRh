@@ -188,6 +188,7 @@ public sealed class AutomationService : IAutomationStateService
                 _logger.LogInformation("[Full Search] Extracted {Total} jobs on {Platform} for '{Name}'", extractedJobs.Count, profile.Platform, profile.Name);
 
                 var limit = Math.Min(extractedJobs.Count, maxJobs);
+                var totalExtracted = 0;
                 for (var j = 0; j < limit; j++)
                 {
                     if (token.IsCancellationRequested) break;
@@ -213,6 +214,7 @@ public sealed class AutomationService : IAutomationStateService
                         _logger.LogInformation("[Full Search] Found Easy Apply job '{Title}' at {Company}, sending to apply queue", extracted.Title, extracted.Company);
                         await writer.WriteAsync(extracted, token);
                         totalFound++;
+                        totalExtracted++;
                     }
                     else
                     {
@@ -222,12 +224,12 @@ public sealed class AutomationService : IAutomationStateService
                         var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
                         await SaveJobAsync(jobRepo, extracted, details, profile, false);
                         totalFound++;
+                        totalExtracted++;
                     }
                 }
 
                 // Pagination: navigate to next pages using direct URL navigation
                 var pageNum = 1;
-                var totalExtracted = limit;
 
                 while (!token.IsCancellationRequested && totalExtracted < maxJobs)
                 {
@@ -240,17 +242,18 @@ public sealed class AutomationService : IAutomationStateService
                     var moreJobs = await adapter.ExtractListingsAsync(page);
                     _logger.LogInformation("[Full Search] Page {PageNum}: found {Count} job(s) for '{ProfileName}'", pageNum, moreJobs.Count, profile.Name);
 
-                    // Menos de 25 resultados indica que estamos na última página
-                    if (moreJobs.Count < 25)
+                    // No more results → end pagination
+                    if (moreJobs.Count == 0)
                     {
-                        _logger.LogInformation("[Full Search] Less than 25 results on page {PageNum}, assuming last page for '{ProfileName}'", pageNum, profile.Name);
+                        _logger.LogInformation("[Full Search] No results on page {PageNum}, ending pagination", pageNum);
                         break;
                     }
 
+                    // Calculate how many more jobs we can process on this page
                     var remaining = maxJobs - totalExtracted;
-                    var limit2 = Math.Min(moreJobs.Count, remaining);
+                    var jobsToProcess = Math.Min(moreJobs.Count, remaining);
 
-                    for (var j = 0; j < limit2; j++)
+                    for (var j = 0; j < jobsToProcess; j++)
                     {
                         if (token.IsCancellationRequested) break;
 
@@ -282,6 +285,20 @@ public sealed class AutomationService : IAutomationStateService
                         }
 
                         totalExtracted++;
+                    }
+
+                    // Stop pagination if we processed enough jobs
+                    if (totalExtracted >= maxJobs)
+                    {
+                        _logger.LogInformation("[Full Search] Reached max jobs limit ({MaxJobs}) on page {PageNum}", maxJobs, pageNum);
+                        break;
+                    }
+
+                    // Less than 25 results = likely last page
+                    if (moreJobs.Count < 25)
+                    {
+                        _logger.LogInformation("[Full Search] Less than 25 results on page {PageNum}, assuming last page for '{ProfileName}'", pageNum, profile.Name);
+                        break;
                     }
                 }
             }
@@ -610,17 +627,18 @@ public sealed class AutomationService : IAutomationStateService
                 var moreJobs = await adapter.ExtractListingsAsync(page);
                 _logger.LogInformation("[{Current}/{Total}] Page {PageNum}: found {Count} job(s) for '{ProfileName}'", current, total, pageNum, moreJobs.Count, profile.Name);
 
-                // Menos de 25 resultados indica que estamos na última página
-                if (moreJobs.Count < 25)
+                // No more results → end pagination
+                if (moreJobs.Count == 0)
                 {
-                    _logger.LogInformation("[{Current}/{Total}] Less than 25 results on page {PageNum}, assuming last page for '{ProfileName}'", current, total, pageNum, profile.Name);
+                    _logger.LogInformation("[{Current}/{Total}] No results on page {PageNum}, ending pagination", current, total, pageNum);
                     break;
                 }
 
+                // Calculate how many more jobs we can process on this page
                 var remaining = maxJobs - totalExtracted;
-                var limit2 = Math.Min(moreJobs.Count, remaining);
+                var jobsToProcess = Math.Min(moreJobs.Count, remaining);
 
-                for (var k = 0; k < limit2; k++)
+                for (var k = 0; k < jobsToProcess; k++)
                 {
                     if (token.IsCancellationRequested) break;
 
@@ -643,6 +661,20 @@ public sealed class AutomationService : IAutomationStateService
 
                     await SaveJobAsync(jobRepo, extracted, details, profile, isEasyApply);
                     totalExtracted++;
+                }
+
+                // Stop pagination if we processed enough jobs
+                if (totalExtracted >= maxJobs)
+                {
+                    _logger.LogInformation("[{Current}/{Total}] Reached max jobs limit ({MaxJobs}) on page {PageNum}", current, total, maxJobs, pageNum);
+                    break;
+                }
+
+                // Less than 25 results = likely last page
+                if (moreJobs.Count < 25)
+                {
+                    _logger.LogInformation("[{Current}/{Total}] Less than 25 results on page {PageNum}, assuming last page for '{ProfileName}'", current, total, pageNum, profile.Name);
+                    break;
                 }
             }
 
