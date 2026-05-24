@@ -196,9 +196,6 @@ public sealed class AutomationService : IAutomationStateService
 
                     UpdateStatus($"Full Search: checking {extracted.Title} ({j + 1}/{limit})", i + 1, profiles.Count);
 
-                    var (details, updatedExtracted) = await FetchJobDetailsAsync(page, adapter, extracted, searchUrl, token);
-                    extracted = updatedExtracted;
-
                     var isEasyApply = extracted.EasyApply;
 
                     if (globalEasyApply && !isEasyApply)
@@ -206,6 +203,9 @@ public sealed class AutomationService : IAutomationStateService
                         _logger.LogInformation("[Full Search] Skipping non-Easy-Apply: '{Title}'", extracted.Title);
                         continue;
                     }
+
+                    var (details, updatedExtracted) = await FetchJobDetailsAsync(page, adapter, extracted, searchUrl, token);
+                    extracted = updatedExtracted;
 
                     if (isEasyApply)
                     {
@@ -222,6 +222,66 @@ public sealed class AutomationService : IAutomationStateService
                         var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
                         await SaveJobAsync(jobRepo, extracted, details, profile, false);
                         totalFound++;
+                    }
+                }
+
+                // Pagination: navigate to next pages using direct URL navigation
+                var pageNum = 1;
+                var totalExtracted = limit;
+
+                while (!token.IsCancellationRequested && totalExtracted < maxJobs)
+                {
+                    pageNum++;
+                    _logger.LogInformation("[Full Search] Page {PageNum}: URL = {Url}", pageNum, adapter.BuildSearchUrl(profile, pageNum));
+
+                    await adapter.NavigateToPageAsync(page, profile, pageNum);
+                    await Task.Delay(2000, token);
+
+                    var moreJobs = await adapter.ExtractListingsAsync(page);
+                    _logger.LogInformation("[Full Search] Page {PageNum}: found {Count} job(s) for '{ProfileName}'", pageNum, moreJobs.Count, profile.Name);
+
+                    // Menos de 25 resultados indica que estamos na última página
+                    if (moreJobs.Count < 25)
+                    {
+                        _logger.LogInformation("[Full Search] Less than 25 results on page {PageNum}, assuming last page for '{ProfileName}'", pageNum, profile.Name);
+                        break;
+                    }
+
+                    var remaining = maxJobs - totalExtracted;
+                    var limit2 = Math.Min(moreJobs.Count, remaining);
+
+                    for (var j = 0; j < limit2; j++)
+                    {
+                        if (token.IsCancellationRequested) break;
+
+                        var extracted = moreJobs[j];
+                        UpdateStatus($"Full Search: checking {extracted.Title} (page {pageNum})", i + 1, profiles.Count);
+
+                        var isEasyApply = extracted.EasyApply;
+
+                        if (globalEasyApply && !isEasyApply)
+                        {
+                            _logger.LogInformation("[Full Search] Skipping non-Easy-Apply: '{Title}'", extracted.Title);
+                            continue;
+                        }
+
+                        var (details, updatedExtracted) = await FetchJobDetailsAsync(page, adapter, extracted, searchUrl, token);
+                        extracted = updatedExtracted;
+
+                        if (isEasyApply)
+                        {
+                            _logger.LogInformation("[Full Search] Found Easy Apply job '{Title}' at {Company}, sending to apply queue", extracted.Title, extracted.Company);
+                            await writer.WriteAsync(extracted, token);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("[Full Search] Saving non-Easy-Apply job: '{Title}' at {Company}", extracted.Title, extracted.Company);
+                            using var saveScope = _scopeFactory.CreateScope();
+                            var jobRepo = saveScope.ServiceProvider.GetRequiredService<IJobRepository>();
+                            await SaveJobAsync(jobRepo, extracted, details, profile, false);
+                        }
+
+                        totalExtracted++;
                     }
                 }
             }
@@ -517,9 +577,6 @@ public sealed class AutomationService : IAutomationStateService
 
                 UpdateStatus($"Opening: {extracted.Title} ({i + 1}/{extractedJobs.Count})", current, total);
 
-                var (details, updatedExtracted) = await FetchJobDetailsAsync(page, adapter, extracted, searchUrl, token);
-                extracted = updatedExtracted;
-
                 var isEasyApply = extracted.EasyApply;
 
                 if (globalEasyApply && !isEasyApply)
@@ -528,12 +585,69 @@ public sealed class AutomationService : IAutomationStateService
                     continue;
                 }
 
+                var (details, updatedExtracted) = await FetchJobDetailsAsync(page, adapter, extracted, searchUrl, token);
+                extracted = updatedExtracted;
+
                 _logger.LogInformation("[{Current}/{Total}] Saving job: '{Title}' at {Company} | EasyApply: {EasyApply} | Desc: {DescLen} chars",
                     current, total, extracted.Title, extracted.Company, isEasyApply, details?.Description?.Length ?? 0);
 
                 await SaveJobAsync(jobRepo, extracted, details, profile, isEasyApply);
                 savedCount++;
             }
+
+            // Pagination: navigate to next pages using direct URL navigation
+            var pageNum = 1;
+            var totalExtracted = savedCount;
+
+            while (!token.IsCancellationRequested && totalExtracted < maxJobs)
+            {
+                pageNum++;
+                _logger.LogInformation("[{Current}/{Total}] Page {PageNum}: URL = {Url}", current, total, pageNum, adapter.BuildSearchUrl(profile, pageNum));
+
+                await adapter.NavigateToPageAsync(page, profile, pageNum);
+                await Task.Delay(2000, token);
+
+                var moreJobs = await adapter.ExtractListingsAsync(page);
+                _logger.LogInformation("[{Current}/{Total}] Page {PageNum}: found {Count} job(s) for '{ProfileName}'", current, total, pageNum, moreJobs.Count, profile.Name);
+
+                // Menos de 25 resultados indica que estamos na última página
+                if (moreJobs.Count < 25)
+                {
+                    _logger.LogInformation("[{Current}/{Total}] Less than 25 results on page {PageNum}, assuming last page for '{ProfileName}'", current, total, pageNum, profile.Name);
+                    break;
+                }
+
+                var remaining = maxJobs - totalExtracted;
+                var limit2 = Math.Min(moreJobs.Count, remaining);
+
+                for (var k = 0; k < limit2; k++)
+                {
+                    if (token.IsCancellationRequested) break;
+
+                    var extracted = moreJobs[k];
+                    UpdateStatus($"Opening: {extracted.Title} (page {pageNum})", current, total);
+
+                    var isEasyApply = extracted.EasyApply;
+
+                    if (globalEasyApply && !isEasyApply)
+                    {
+                        _logger.LogInformation("[{Current}/{Total}] Skipping non-Easy-Apply: '{Title}'", current, total, extracted.Title);
+                        continue;
+                    }
+
+                    var (details, updatedExtracted) = await FetchJobDetailsAsync(page, adapter, extracted, searchUrl, token);
+                    extracted = updatedExtracted;
+
+                    _logger.LogInformation("[{Current}/{Total}] Saving job: '{Title}' at {Company} | EasyApply: {EasyApply} | Desc: {DescLen} chars",
+                        current, total, extracted.Title, extracted.Company, isEasyApply, details?.Description?.Length ?? 0);
+
+                    await SaveJobAsync(jobRepo, extracted, details, profile, isEasyApply);
+                    totalExtracted++;
+                }
+            }
+
+            _logger.LogInformation("[{Current}/{Total}] Finished pagination for '{ProfileName}': extracted {Total} job(s) across {Pages} page(s)",
+                current, total, profile.Name, totalExtracted, pageNum);
 
             _logger.LogInformation("[{Current}/{Total}] Saved {Count} job(s) for '{Name}'", current, total, savedCount, profile.Name);
             return savedCount;

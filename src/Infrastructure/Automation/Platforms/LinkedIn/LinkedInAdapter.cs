@@ -230,6 +230,13 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         _logger.LogWarning("Could not find next page button on LinkedIn");
     }
 
+    public async Task NavigateToPageAsync(IPage page, SearchProfile profile, int pageNum)
+    {
+        var url = BuildSearchUrl(profile, pageNum);
+        await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await Task.Delay(2000);
+    }
+
     public async Task<JobDetail> ExtractJobDetailsAsync(IPage page, string url)
     {
         if (!page.Url.Contains(url) && !string.IsNullOrEmpty(url))

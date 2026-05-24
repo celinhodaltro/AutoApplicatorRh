@@ -14,6 +14,7 @@ public interface IPlatformAdapter
     Task<List<ExtractedJob>> ExtractListingsAsync(IPage page);
     Task<bool> HasNextPageAsync(IPage page);
     Task GoToNextPageAsync(IPage page);
+    Task NavigateToPageAsync(IPage page, SearchProfile profile, int pageNum);
     Task<JobDetail> ExtractJobDetailsAsync(IPage page, string url);
 }
 

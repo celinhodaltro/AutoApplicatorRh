@@ -126,6 +126,12 @@ public sealed class GupyAdapter : IPlatformAdapter
         return Task.CompletedTask;
     }
 
+    public Task NavigateToPageAsync(IPage page, SearchProfile profile, int pageNum)
+    {
+        // Gupy não tem paginação
+        return Task.CompletedTask;
+    }
+
     public async Task<JobDetail> ExtractJobDetailsAsync(IPage page, string url)
     {
         if (!page.Url.Contains(url) && !string.IsNullOrEmpty(url))
