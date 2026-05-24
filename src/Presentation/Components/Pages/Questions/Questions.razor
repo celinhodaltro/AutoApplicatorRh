@@ -2,60 +2,181 @@
 @using Radzen
 @using Radzen.Blazor
 @inject IMediator Mediator
-@inject IQuestionRepository QuestionRepo
+@inject AutoApplicator.Infrastructure.Services.NotificationService NotificationService
 
-<RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 24px;">Questions</RadzenText>
+<div class="questions-page">
 
-<div style="display: flex; gap: 8px; margin-bottom: 16px;">
-    <RadzenButton Text="All" Size="ButtonSize.Small"
-        ButtonStyle="@(!_showUnansweredOnly ? ButtonStyle.Primary : ButtonStyle.Base)"
-        Click="@(() => { _showUnansweredOnly = false; ApplyFilter(); })" />
-    <RadzenButton Text="Unanswered" Size="ButtonSize.Small"
-        ButtonStyle="@(_showUnansweredOnly ? ButtonStyle.Primary : ButtonStyle.Base)"
-        Click="@(() => { _showUnansweredOnly = true; ApplyFilter(); })" />
-</div>
+    <!-- HEADER -->
+    <div class="page-header">
+        <div>
+            <RadzenText TextStyle="TextStyle.H4" class="page-title">
+                Questions
+            </RadzenText>
 
-@foreach (var question in _filteredQuestions)
-{
-    <QuestionCard Question="@question">
-        <AnswerInput>
-            @switch (question.FieldType)
-            {
-                case QuestionFieldType.Select:
-                case QuestionFieldType.Radio:
-                    <RadzenDropDown @bind-Value="@_answers[question.Id]"
-                        Data="@question.Options" Placeholder="Select answer" style="width: 100%;" />
-                    break;
-                case QuestionFieldType.Textarea:
-                    <RadzenTextArea @bind-Value="@_answers[question.Id]" Rows="3" Placeholder="Type your answer..." style="width: 100%;" />
-                    break;
-                case QuestionFieldType.Checkbox:
-                    <RadzenCheckBox @bind-Value="@_checkboxAnswers[question.Id]" Caption="Check if applicable" />
-                    break;
-                case QuestionFieldType.File:
-                    <RadzenText TextStyle="TextStyle.Body2" style="color: var(--rz-text-secondary);">File upload not available</RadzenText>
-                    break;
-                default:
-                    <RadzenTextBox @bind-Value="@_answers[question.Id]" Placeholder="Type your answer..." style="width: 100%;" />
-                    break;
-            }
-        </AnswerInput>
-        <ChildContent>
-            <RadzenButton Text="Save Answer" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Small"
-                Click="@(() => SaveAnswer(question))"
-                Disabled="@string.IsNullOrEmpty(_answers.GetValueOrDefault(question.Id))" />
-            <RadzenButton Text="Delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
-                Click="@(() => DeleteQuestion(question))" />
-        </ChildContent>
-    </QuestionCard>
-}
+            <RadzenText TextStyle="TextStyle.Body2" class="page-subtitle">
+                Manage and answer collected application questions
+            </RadzenText>
+        </div>
 
-@if (_filteredQuestions.Count == 0)
-{
-    <div style="text-align: center; padding: 48px;">
-        <RadzenText TextStyle="TextStyle.Body1" style="color: var(--rz-text-secondary);">No questions found.</RadzenText>
+        <div class="header-actions">
+            <div class="filter-bar">
+                <RadzenButton Text="All"
+                              Icon="list"
+                              Size="ButtonSize.Small"
+                              ButtonStyle="@(!_showUnansweredOnly ? ButtonStyle.Primary : ButtonStyle.Light)"
+                              Click="@(() => { _showUnansweredOnly = false; ApplyFilter(); })" />
+
+                <RadzenButton Text="Unanswered"
+                              Icon="warning"
+                              Size="ButtonSize.Small"
+                              ButtonStyle="@(_showUnansweredOnly ? ButtonStyle.Warning : ButtonStyle.Light)"
+                              Click="@(() => { _showUnansweredOnly = true; ApplyFilter(); })" />
+            </div>
+
+            <RadzenButton Text="Save All"
+                          Icon="save"
+                          Size="ButtonSize.Small"
+                          ButtonStyle="ButtonStyle.Primary"
+                          Disabled="@(_modifiedQuestionIds.Count == 0)"
+                          Click="@SaveAllAnswers" />
+        </div>
     </div>
-}
+
+    <!-- GROUPS -->
+    <RadzenRow Gap="16px">
+
+        @foreach (var group in _groupedQuestions)
+        {
+            <RadzenColumn Size="12" SizeMD="6">
+
+                <RadzenCard class="group-card">
+
+                    <!-- GROUP HEADER -->
+                    <div class="group-header">
+
+                        <div class="group-title">
+                            <span class="group-icon">
+                                @GetGroupIcon(group.Key)
+                            </span>
+
+                            <div>
+                                <div class="group-name">
+                                    @group.Key
+                                </div>
+
+                                <div class="group-count">
+                                    @group.Questions.Count question(s)
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- QUESTIONS -->
+                    <div class="questions-stack">
+
+                        @foreach (var question in group.Questions)
+                        {
+                            <div class="question-item">
+
+                                <!-- TITLE -->
+                                <div class="question-top">
+                                    <RadzenText TextStyle="TextStyle.Body1" class="question-title">
+                                        @question.QuestionText
+                                    </RadzenText>
+                                </div>
+
+                                <!-- TAGS -->
+                                <div class="question-tags">
+
+                                    <RadzenBadge Text="@question.Platform.ToString()"
+                                                 Shade="Shade.Light"
+                                                 Variant="Variant.Flat"
+                                                 class="platform-badge" />
+
+                                    <RadzenBadge Text="@question.FieldType.ToString()"
+                                                 Shade="Shade.Light"
+                                                 Variant="Variant.Flat"
+                                                 class="type-badge" />
+
+                                </div>
+
+                                <!-- ANSWER -->
+                                <div class="question-body">
+
+                                    @switch (question.FieldType)
+                                    {
+                                        case QuestionFieldType.Select:
+                                        case QuestionFieldType.Radio:
+
+                                            <RadzenDropDown @bind-Value="@_answers[question.Id]"
+                                                            Change="@(args => MarkModified(question.Id))"
+                                                            Data="@question.Options"
+                                                            Placeholder="Select answer"
+                                                            Style="width:100%;" />
+                                            break;
+
+                                        case QuestionFieldType.Textarea:
+
+                                            <RadzenTextArea @bind-Value="@_answers[question.Id]"
+                                                            Change="@(args => MarkModified(question.Id))"
+                                                            Rows="4"
+                                                            Placeholder="Type your answer..."
+                                                            Style="width:100%;" />
+                                            break;
+
+                                        case QuestionFieldType.Checkbox:
+
+                                            <RadzenCheckBox @bind-Value="@_checkboxAnswers[question.Id]"
+                                                            Change="@(args => MarkModified(question.Id))"
+                                                            TValue="bool" />
+                                            break;
+
+                                        default:
+
+                                            <RadzenTextBox @bind-Value="@_answers[question.Id]"
+                                                           Change="@(args => MarkModified(question.Id))"
+                                                           Placeholder="Type your answer..."
+                                                           Style="width:100%;" />
+                                            break;
+                                    }
+
+                                </div>
+
+                                <!-- FOOTER -->
+                                <div class="question-footer">
+
+                                    <RadzenButton Text="Delete"
+                                                  Icon="delete"
+                                                  Size="ButtonSize.Small"
+                                                  ButtonStyle="ButtonStyle.Danger"
+                                                  Variant="Variant.Flat"
+                                                  Click="@(() => DeleteQuestion(question))" />
+
+                                </div>
+
+                            </div>
+                        }
+
+                    </div>
+
+                </RadzenCard>
+
+            </RadzenColumn>
+        }
+
+    </RadzenRow>
+
+    @if (_filteredQuestions.Count == 0)
+    {
+        <RadzenCard class="empty-card">
+            <RadzenText TextStyle="TextStyle.Body1">
+                No questions found.
+            </RadzenText>
+        </RadzenCard>
+    }
+
+</div>
 
 @code {
     private List<CollectedQuestion> _allQuestions = [];
@@ -63,6 +184,18 @@
     private bool _showUnansweredOnly;
     private Dictionary<Guid, string> _answers = [];
     private Dictionary<Guid, bool> _checkboxAnswers = [];
+    private HashSet<Guid> _modifiedQuestionIds = [];
+
+    // Propriedade computada para agrupamento
+    private List<QuestionGroup> _groupedQuestions => _filteredQuestions
+        .GroupBy(q => string.IsNullOrEmpty(q.Group) ? "Other" : q.Group)
+        .OrderBy(g => g.Key)
+        .Select(g => new QuestionGroup
+        {
+            Key = g.Key,
+            Questions = g.ToList()
+        })
+        .ToList();
 
     protected override async Task OnInitializedAsync()
     {
@@ -74,6 +207,7 @@
         _allQuestions = await Mediator.Send(new GetQuestionsQuery());
         _answers = _allQuestions.ToDictionary(q => q.Id, q => q.Answer);
         _checkboxAnswers = _allQuestions.ToDictionary(q => q.Id, q => !string.IsNullOrEmpty(q.Answer));
+        _modifiedQuestionIds.Clear();
         ApplyFilter();
     }
 
@@ -84,19 +218,86 @@
             : [.. _allQuestions];
     }
 
-    private async Task SaveAnswer(CollectedQuestion question)
+    private void MarkModified(Guid questionId)
     {
-        var answer = question.FieldType == QuestionFieldType.Checkbox
-            ? (_checkboxAnswers.GetValueOrDefault(question.Id) ? "Yes" : "")
-            : (_answers.GetValueOrDefault(question.Id) ?? "");
+        _modifiedQuestionIds.Add(questionId);
+    }
 
-        await Mediator.Send(new SetQuestionAnswerCommand(question.Id, answer));
+    private async Task SaveAllAnswers()
+    {
+        var errors = new List<string>();
+
+        foreach (var questionId in _modifiedQuestionIds)
+        {
+            try
+            {
+                var question = _allQuestions.FirstOrDefault(q => q.Id == questionId);
+                if (question is null) continue;
+
+                var answer = question.FieldType == QuestionFieldType.Checkbox
+                    ? (_checkboxAnswers.GetValueOrDefault(questionId) ? "Yes" : "")
+                    : (_answers.GetValueOrDefault(questionId) ?? "");
+
+                await Mediator.Send(new SetQuestionAnswerCommand(questionId, answer));
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"Question {questionId}: {ex.Message}");
+            }
+        }
+
+        _modifiedQuestionIds.Clear();
+
+        if (errors.Count == 0)
+        {
+            NotificationService.Add(AutoApplicator.Infrastructure.Services.NotificationType.Success, "Saved", "All answers saved successfully.");
+        }
+        else
+        {
+            NotificationService.Add(
+                AutoApplicator.Infrastructure.Services.NotificationType.Warning,
+                "Partial Save",
+                $"{errors.Count} question(s) failed to save.");
+        }
+
         await LoadQuestions();
     }
 
     private async Task DeleteQuestion(CollectedQuestion question)
     {
-        await QuestionRepo.DeleteAsync(question.Id, default);
-        await LoadQuestions();
+        try
+        {
+            await Mediator.Send(new DeleteQuestionCommand(question.Id));
+            _modifiedQuestionIds.Remove(question.Id);
+            NotificationService.Add(AutoApplicator.Infrastructure.Services.NotificationType.Success, "Deleted", "Question deleted successfully.");
+            await LoadQuestions();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Add(AutoApplicator.Infrastructure.Services.NotificationType.Error, "Error", $"Failed to delete question: {ex.Message}");
+        }
+    }
+
+    private static string GetGroupIcon(string groupName)
+    {
+        return groupName.ToLowerInvariant() switch
+        {
+            "other" => "📄",
+            "informações de contato" or "contact info" => "📋",
+            "education" or "educação" => "🎓",
+            "work authorization" or "autorização de trabalho" => "🛂",
+            "experience" or "experiência" => "💼",
+            "skills" or "habilidades" => "🔧",
+            "certifications" or "certificações" => "📜",
+            "languages" or "idiomas" => "🌐",
+            "summary" or "resumo" => "📝",
+            _ => "📌"
+        };
+    }
+
+    private class QuestionGroup
+    {
+        public string Key { get; set; } = "";
+        public List<CollectedQuestion> Questions { get; set; } = [];
     }
 }

@@ -54,7 +54,6 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
                     "--disable-web-security",
                     "--disable-features=BlockInsecurePrivateNetworkRequests"
                 ],
-                ViewportSize = new ViewportSize { Width = 1920, Height = 1080 },
                 Locale = "en-US",
                 TimezoneId = "America/New_York",
                 UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -64,8 +63,6 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
 
             var pages = _context.Pages;
             _page = pages.Count > 0 ? pages[0] : await _context.NewPageAsync();
-
-            await _page.SetViewportSizeAsync(1920, 1080);
 
             await _context.AddInitScriptAsync("""
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });

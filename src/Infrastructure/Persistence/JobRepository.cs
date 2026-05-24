@@ -93,7 +93,16 @@ public sealed class JobRepository : IJobRepository
     {
         try
         {
-            _context.JobListings.Update(job);
+            var existing = await _context.JobListings.FindAsync([job.Id], cancellationToken);
+            if (existing is not null)
+            {
+                _context.Entry(existing).CurrentValues.SetValues(job);
+            }
+            else
+            {
+                _context.JobListings.Attach(job);
+                _context.Entry(job).State = EntityState.Modified;
+            }
             await _context.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)

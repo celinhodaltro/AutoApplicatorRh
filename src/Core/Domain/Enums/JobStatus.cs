@@ -7,6 +7,7 @@ public enum JobStatus
     Approved,
     Rejected,
     Applied,
+    Pending,
     Skipped,
     Error
 }

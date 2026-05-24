@@ -10,38 +10,36 @@ public partial class Settings
     private int _maxApplications = 100;
     private bool _headlessMode = true;
 
-    private LogType _logType = LogType.Services;
-    private bool _loadingLogs;
+    private bool _logView = true;
     private List<string> _logLines = [];
-    private string _currentLogPath = "";
-
-    private const string PrefEasyApply = "global_easy_apply";
-    private const string PrefActionDelay = "action_delay";
-    private const string PrefProfileCooldown = "profile_cooldown";
-    private const string PrefMaxApps = "max_applications";
-    private const string PrefHeadless = "headless_mode";
 
     protected override void OnInitialized()
     {
-        _globalEasyApply = Preferences.Get(PrefEasyApply, false);
-        _actionDelay = Preferences.Get(PrefActionDelay, 1000);
-        _profileCooldown = Preferences.Get(PrefProfileCooldown, 30);
-        _maxApplications = Preferences.Get(PrefMaxApps, 100);
-        _headlessMode = Preferences.Get(PrefHeadless, true);
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender) await LoadLogContent();
+        try
+        {
+            _globalEasyApply = Preferences.Get("global_easy_apply", false);
+            _actionDelay = Preferences.Get("action_delay", 1000);
+            _profileCooldown = Preferences.Get("profile_cooldown", 30);
+            _maxApplications = Preferences.Get("max_applications", 100);
+            _headlessMode = Preferences.Get("headless_mode", true);
+        }
+        catch
+        {
+            // Preferences not available (e.g., during testing)
+        }
     }
 
     private void SaveSettings()
     {
-        Preferences.Set(PrefEasyApply, _globalEasyApply);
-        Preferences.Set(PrefActionDelay, _actionDelay);
-        Preferences.Set(PrefProfileCooldown, _profileCooldown);
-        Preferences.Set(PrefMaxApps, _maxApplications);
-        Preferences.Set(PrefHeadless, _headlessMode);
+        try
+        {
+            Preferences.Set("global_easy_apply", _globalEasyApply);
+            Preferences.Set("action_delay", _actionDelay);
+            Preferences.Set("profile_cooldown", _profileCooldown);
+            Preferences.Set("max_applications", _maxApplications);
+            Preferences.Set("headless_mode", _headlessMode);
+        }
+        catch { }
     }
 
     private void OpenLogin(PlatformType platform)
@@ -67,57 +65,6 @@ public partial class Settings
         catch { }
     }
 
-    private async Task SwitchLogs(LogType type)
-    {
-        _logType = type;
-        await LoadLogContent();
-    }
-
-    private async Task RefreshLogs() => await LoadLogContent();
-
-    private async Task LoadLogContent()
-    {
-        _loadingLogs = true;
-
-        try
-        {
-            var subDir = _logType == LogType.Services ? "Services" : "Error";
-            var logDir = Path.Combine(FileSystem.AppDataDirectory, "Logs", subDir);
-
-            if (!Directory.Exists(logDir))
-            {
-                _logLines = [];
-                _currentLogPath = logDir;
-                return;
-            }
-
-            var logFiles = Directory.GetFiles(logDir, "*.txt")
-                .OrderByDescending(f => f)
-                .ToList();
-
-            if (logFiles.Count == 0)
-            {
-                _logLines = [];
-                _currentLogPath = logDir;
-                return;
-            }
-
-            var latestFile = logFiles.First();
-            _currentLogPath = latestFile;
-
-            var lines = await File.ReadAllLinesAsync(latestFile);
-            _logLines = lines.Reverse().Take(200).Reverse().ToList();
-        }
-        catch (Exception ex)
-        {
-            _logLines = [$"Error loading logs: {ex.Message}"];
-        }
-        finally
-        {
-            _loadingLogs = false;
-        }
-    }
-
     private void OpenLogsFolder()
     {
         var logDir = Path.Combine(FileSystem.AppDataDirectory, "Logs");
@@ -133,14 +80,11 @@ public partial class Settings
         }
     }
 
-    private static string GetLogLineClass(string line)
+    private string GetLogLineClass(string line)
     {
-        if (line.Contains("[ERR]") || line.Contains("[FTL]")) return "color: #f44747;";
-        if (line.Contains("[WRN]")) return "color: #dcdcaa;";
-        if (line.Contains("[INF]")) return "color: #6a9955;";
-        if (line.Contains("[DBG]") || line.Contains("[VRB]")) return "color: #569cd6;";
+        if (line.Contains("[ERR]") || line.Contains("[FTL]")) return "color:#f44747;";
+        if (line.Contains("[WRN]")) return "color:#dcdcaa;";
+        if (line.Contains("[INF]")) return "color:#6a9955;";
         return "";
     }
-
-    private enum LogType { Services, Error }
 }

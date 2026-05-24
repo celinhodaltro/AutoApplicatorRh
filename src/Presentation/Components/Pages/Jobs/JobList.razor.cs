@@ -103,6 +103,7 @@ public partial class JobList
         JobStatus.Approved => BadgeStyle.Success,
         JobStatus.Rejected => BadgeStyle.Danger,
         JobStatus.Applied => BadgeStyle.Primary,
+        JobStatus.Pending => BadgeStyle.Warning,
         JobStatus.Skipped => BadgeStyle.Light,
         JobStatus.Error => BadgeStyle.Danger,
         _ => BadgeStyle.Light,

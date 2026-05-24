@@ -103,11 +103,11 @@
                         <td class="col-date"><span class="posted-date">@job.PostedDate.ToShortDateString()</span></td>
                         <td class="col-actions">
                             <div class="action-buttons">
-                                <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Base" Click="@(() => Navigation.NavigateTo($"/jobs/{job.Id}"))" title="View details">👁️</RadzenButton>
+                                <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Base" Click="@(() => Navigation.NavigateTo($"/jobs/{job.Id}"))" title="View details"><RadzenIcon Icon="visibility" /></RadzenButton>
                                 @if (job.Status is JobStatus.New or JobStatus.Reviewed)
                                 {
-                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Success" Click="@(() => ApproveSingle(job))" title="Approve">✅</RadzenButton>
-                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Warning" Click="@(() => RejectSingle(job))" title="Reject">❌</RadzenButton>
+                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Success" Click="@(() => ApproveSingle(job))" title="Approve"><RadzenIcon Icon="check_circle" /></RadzenButton>
+                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Warning" Click="@(() => RejectSingle(job))" title="Reject"><RadzenIcon Icon="cancel" /></RadzenButton>
                                 }
                             </div>
                         </td>

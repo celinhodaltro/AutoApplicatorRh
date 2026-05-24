@@ -28,6 +28,7 @@ public partial class Home
     private List<ChartDataItem> _jobsByPlatform = [];
     private List<ChartDataItem> _questionsStatus = [];
     private List<JobListing> _recentJobs = [];
+    private List<PipelineItem> _pipelineItems = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -50,7 +51,7 @@ public partial class Home
         _totalProfiles = profiles.Count;
         _activeProfiles = profiles.Count(p => p.Enabled);
         _totalJobs = jobs.Count;
-        _pendingReview = jobs.Count(j => j.Status is JobStatus.New or JobStatus.Reviewed);
+        _pendingReview = jobs.Count(j => j.Status is JobStatus.New or JobStatus.Reviewed or JobStatus.Pending);
         _appliedJobs = jobs.Count(j => j.Status == JobStatus.Applied);
         _approvedJobs = jobs.Count(j => j.Status == JobStatus.Approved);
         _totalQuestions = questions.Count;
@@ -68,6 +69,20 @@ public partial class Home
         _questionsStatus = [new() { Category = "Answered", Value = answered }, new() { Category = "Unanswered", Value = questions.Count - answered }];
 
         _recentJobs = jobs.OrderByDescending(j => j.CreatedAt).Take(5).ToList();
+
+        var pipelineOrder = new (JobStatus Status, string Name, string Color)[]
+        {
+            (JobStatus.New, "New", "#2196F3"),
+            (JobStatus.Reviewed, "Reviewed", "#FF9800"),
+            (JobStatus.Approved, "Approved", "#4CAF50"),
+            (JobStatus.Pending, "Pending", "#9C27B0"),
+            (JobStatus.Applied, "Applied", "#2E7D32"),
+            (JobStatus.Rejected, "Rejected", "#F44336"),
+        };
+
+        _pipelineItems = pipelineOrder
+            .Select(p => new PipelineItem { Name = p.Name, Count = jobs.Count(j => j.Status == p.Status), Color = p.Color })
+            .ToList();
     }
 
     private static BadgeStyle GetStatusBadge(JobStatus status) => status switch
@@ -77,6 +92,7 @@ public partial class Home
         JobStatus.Approved => BadgeStyle.Success,
         JobStatus.Rejected => BadgeStyle.Danger,
         JobStatus.Applied => BadgeStyle.Primary,
+        JobStatus.Pending => BadgeStyle.Warning,
         JobStatus.Skipped => BadgeStyle.Light,
         JobStatus.Error => BadgeStyle.Danger,
         _ => BadgeStyle.Light,
@@ -86,5 +102,12 @@ public partial class Home
     {
         public string Category { get; set; } = string.Empty;
         public int Value { get; set; }
+    }
+
+    private class PipelineItem
+    {
+        public string Name { get; set; } = string.Empty;
+        public int Count { get; set; }
+        public string Color { get; set; } = string.Empty;
     }
 }

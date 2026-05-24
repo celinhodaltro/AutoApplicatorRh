@@ -12,6 +12,7 @@ public class CollectedQuestion
     public PlatformType? Platform { get; set; }
     public string? JobTitle { get; set; }
     public string? Company { get; set; }
+    public string? Group { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

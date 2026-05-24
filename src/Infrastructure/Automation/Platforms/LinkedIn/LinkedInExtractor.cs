@@ -381,36 +381,7 @@ public sealed class LinkedInExtractor
         catch { return null; }
     }
 
-    private async Task<string> FallbackExtractDescriptionAsync(IPage page)
-    {
-        try
-        {
-            return await page.EvaluateAsync<string>(@"
-                const containers = [
-                    document.querySelector('.scaffold-layout__detail'),
-                    document.querySelector('.jobs-search__job-details'),
-                    document.querySelector('[class*=""job-details""]'),
-                    document.querySelector('.job-view-layout')
-                ].filter(Boolean);
-                const root = containers[0] || document.body;
-                let best = '';
-                const candidates = root.querySelectorAll('div, section, article, span');
-                for (const el of candidates) {
-                    const t = (el.textContent || '').trim();
-                    if (t.length > best.length && t.length > 100) {
-                        const childBlocks = el.querySelectorAll('div, section, article');
-                        if (childBlocks.length < 5) best = t;
-                    }
-                }
-                return best;
-            ");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Fallback description extraction failed");
-            return string.Empty;
-        }
-    }
+
 
     private static async Task<string?> ExtractJobIdFromHrefAsync(IElementHandle el)
     {

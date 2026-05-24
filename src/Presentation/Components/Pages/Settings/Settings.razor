@@ -2,99 +2,33 @@
 @using Radzen
 @using Radzen.Blazor
 
-<div style="margin-bottom: 24px;">
-    <RadzenText TextStyle="TextStyle.H4" style="font-weight: 700;">Settings</RadzenText>
-</div>
+<RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 24px;">Settings</RadzenText>
 
-<RadzenTabs RenderMode="TabRenderMode.Client">
-    <RadzenTabsItem Text="Accounts">
-        <div style="max-width: 640px;">
-            <RadzenText TextStyle="TextStyle.Body2" style="color: var(--rz-text-secondary); margin-bottom: 20px; line-height: 1.5;">
-                Log in to each platform so AutoApplicator can search and apply on your behalf.
-                Click a button below, complete the login in your browser, then come back.
-            </RadzenText>
-            <div style="display: flex; flex-direction: column; gap: 12px;">
-                <div style="display: flex; align-items: center; gap: 16px; padding: 16px 20px; background: white; border: 1px solid #e0e0e0; border-left: 4px solid #0a66c2; border-radius: 12px; cursor: pointer;" @onclick="() => OpenLogin(PlatformType.LinkedIn)">
-                    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; background: #f5f5f5; border-radius: 10px; font-size: 24px;">💼</div>
-                    <div style="flex: 1;">
-                        <RadzenText TextStyle="TextStyle.H6" style="font-weight: 600; margin: 0 0 2px;">LinkedIn</RadzenText>
-                        <RadzenText TextStyle="TextStyle.Body2" style="color: var(--rz-text-tertiary); font-size: 0.85rem;">linkedin.com/login</RadzenText>
-                    </div>
-                    <RadzenButton ButtonStyle="ButtonStyle.Primary">🔑 Log In</RadzenButton>
-                </div>
-                <div style="display: flex; align-items: center; gap: 16px; padding: 16px 20px; background: white; border: 1px solid #e0e0e0; border-left: 4px solid #2164f3; border-radius: 12px; cursor: pointer;" @onclick="() => OpenLogin(PlatformType.Indeed)">
-                    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; background: #f5f5f5; border-radius: 10px; font-size: 24px;">🔍</div>
-                    <div style="flex: 1;">
-                        <RadzenText TextStyle="TextStyle.H6" style="font-weight: 600; margin: 0 0 2px;">Indeed</RadzenText>
-                        <RadzenText TextStyle="TextStyle.Body2" style="color: var(--rz-text-tertiary); font-size: 0.85rem;">secure.indeed.com/auth</RadzenText>
-                    </div>
-                    <RadzenButton ButtonStyle="ButtonStyle.Primary">🔑 Log In</RadzenButton>
-                </div>
-                <div style="display: flex; align-items: center; gap: 16px; padding: 16px 20px; background: white; border: 1px solid #e0e0e0; border-left: 4px solid #6c5ce7; border-radius: 12px; cursor: pointer;" @onclick="() => OpenLogin(PlatformType.Gupy)">
-                    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; background: #f5f5f5; border-radius: 10px; font-size: 24px;">🌟</div>
-                    <div style="flex: 1;">
-                        <RadzenText TextStyle="TextStyle.H6" style="font-weight: 600; margin: 0 0 2px;">Gupy</RadzenText>
-                        <RadzenText TextStyle="TextStyle.Body2" style="color: var(--rz-text-tertiary); font-size: 0.85rem;">portal.gupy.io/login</RadzenText>
-                    </div>
-                    <RadzenButton ButtonStyle="ButtonStyle.Primary">🔑 Log In</RadzenButton>
+<RadzenTabs>
+    <Tabs>
+        <RadzenTabsItem Text="Accounts">
+            <div style="padding: 16px;">
+                <RadzenText TextStyle="TextStyle.Body2">Log in to each platform.</RadzenText>
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
+                    <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@(() => OpenLogin(PlatformType.LinkedIn))"><RadzenIcon Icon="vpn_key" /> LinkedIn Login</RadzenButton>
+                    <RadzenButton ButtonStyle="ButtonStyle.Info" Click="@(() => OpenLogin(PlatformType.Indeed))"><RadzenIcon Icon="vpn_key" /> Indeed Login</RadzenButton>
+                    <RadzenButton ButtonStyle="ButtonStyle.Secondary" Click="@(() => OpenLogin(PlatformType.Gupy))"><RadzenIcon Icon="vpn_key" /> Gupy Login</RadzenButton>
                 </div>
             </div>
-        </div>
-    </RadzenTabsItem>
-
-    <RadzenTabsItem Text="Automation">
-        <div style="max-width: 500px;">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                <RadzenSwitch @bind-Value="@_globalEasyApply" />
-                <RadzenText TextStyle="TextStyle.Body2">Easy Apply only</RadzenText>
+        </RadzenTabsItem>
+        <RadzenTabsItem Text="Automation">
+            <div style="padding: 16px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <RadzenSwitch @bind-Value="@_globalEasyApply" />
+                    <span>Easy Apply only</span>
+                </div>
+                <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@SaveSettings"><RadzenIcon Icon="save" /> Save Settings</RadzenButton>
             </div>
-            <div style="margin-bottom: 16px;">
-                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Delay between actions (ms)</RadzenText>
-                <RadzenNumeric @bind-Value="@_actionDelay" Min="100" Max="30000" Step="100" style="width: 100%;" />
+        </RadzenTabsItem>
+        <RadzenTabsItem Text="Logs">
+            <div style="padding: 16px;">
+                <RadzenButton Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Base" Click="@OpenLogsFolder"><RadzenIcon Icon="folder_open" /> Open Folder</RadzenButton>
             </div>
-            <div style="margin-bottom: 16px;">
-                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Cooldown between profiles (s)</RadzenText>
-                <RadzenNumeric @bind-Value="@_profileCooldown" Min="0" Max="3600" Step="10" style="width: 100%;" />
-            </div>
-            <div style="margin-bottom: 16px;">
-                <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Max applications per session</RadzenText>
-                <RadzenNumeric @bind-Value="@_maxApplications" Min="1" Max="500" Step="1" style="width: 100%;" />
-            </div>
-            <div style="margin-bottom: 16px;">
-                <RadzenCheckBox @bind-Value="@_headlessMode" Caption="Run browser in headless mode" />
-            </div>
-            <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@SaveSettings">💾 Save Settings</RadzenButton>
-        </div>
-    </RadzenTabsItem>
-
-    <RadzenTabsItem Text="Logs">
-        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 16px;">
-            <RadzenButton Size="ButtonSize.Small" ButtonStyle="@(_logType == LogType.Services ? ButtonStyle.Primary : ButtonStyle.Base)" Click="@(() => SwitchLogs(LogType.Services))">Services</RadzenButton>
-            <RadzenButton Size="ButtonSize.Small" ButtonStyle="@(_logType == LogType.Error ? ButtonStyle.Primary : ButtonStyle.Base)" Click="@(() => SwitchLogs(LogType.Error))">Error</RadzenButton>
-            <div style="flex: 1;"></div>
-            <RadzenButton Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Base" Click="@RefreshLogs">🔄 Refresh</RadzenButton>
-            <RadzenButton Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Base" Click="@OpenLogsFolder">📁 Open Folder</RadzenButton>
-        </div>
-        <div style="background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 4px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 0.78rem; max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
-            @if (_loadingLogs)
-            {
-                <div style="color: #888; font-style: italic;">Loading log entries...</div>
-            }
-            else if (_logLines.Count == 0)
-            {
-                <div style="color: #888; font-style: italic;">No log entries found in @(_logType == LogType.Services ? "Services" : "Error") log.</div>
-            }
-            else
-            {
-                @foreach (var line in _logLines)
-                {
-                    var cssClass = GetLogLineClass(line);
-                    <div style="@cssClass">@line</div>
-                }
-            }
-        </div>
-        <div style="margin-top: 8px;">
-            <RadzenText TextStyle="TextStyle.Caption" style="color: var(--rz-text-tertiary);">Location: @_currentLogPath</RadzenText>
-        </div>
-    </RadzenTabsItem>
+        </RadzenTabsItem>
+    </Tabs>
 </RadzenTabs>

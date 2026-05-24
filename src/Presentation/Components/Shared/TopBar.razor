@@ -7,7 +7,7 @@
             <span class="hamburger">☰</span>
         </button>
         <div class="app-brand">
-            <span class="app-logo">⚡</span>
+            <span class="app-logo"><RadzenIcon Icon="flash_on" /></span>
             <span class="app-name">AutoApplicator</span>
         </div>
     </div>
@@ -25,9 +25,21 @@
         else
         {
             <div class="mode-selector">
-                <button class="mode-btn @(_mode == AutomationMode.Search ? "active" : "")" @onclick="() => _mode = AutomationMode.Search" title="Search for jobs only">🔍 Search</button>
-                <button class="mode-btn @(_mode == AutomationMode.Apply ? "active" : "")" @onclick="() => _mode = AutomationMode.Apply" title="Apply to approved jobs only">📤 Apply</button>
-                <button class="mode-btn @(_mode == AutomationMode.Full ? "active" : "")" @onclick="() => _mode = AutomationMode.Full" title="Search then apply">⚡ Full</button>
+                <button class="mode-btn @(_mode == AutomationMode.Search ? "active" : "")"
+                        @onclick="() => _mode = AutomationMode.Search"
+                        title="Search for jobs only">
+                    <RadzenIcon Icon="search" /> Search
+                </button>
+                <button class="mode-btn @(_mode == AutomationMode.Apply ? "active" : "")"
+                        @onclick="() => _mode = AutomationMode.Apply"
+                        title="Apply to approved jobs only">
+                    <RadzenIcon Icon="send" /> Apply
+                </button>
+                <button class="mode-btn @(_mode == AutomationMode.Full ? "active" : "")"
+                        @onclick="() => _mode = AutomationMode.Full"
+                        title="Search then apply">
+                    <RadzenIcon Icon="flash_on" /> Full
+                </button>
             </div>
         }
     </div>
@@ -35,19 +47,29 @@
     <div class="topbar-right">
         @if (AutomationService.IsRunning)
         {
-            <button class="topbar-btn stop-btn" @onclick="StopAutomation">⏹ Stop</button>
+            <RadzenButton ButtonStyle="ButtonStyle.Danger" Click="@(() => StopAutomation())">
+                <RadzenIcon Icon="stop" /> Stop
+            </RadzenButton>
         }
         else
         {
-            <button class="topbar-btn start-btn" @onclick="StartAutomation">
-                @(_mode switch
+            <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@(async () => await StartAutomation())">
+                @switch (_mode)
                 {
-                    AutomationMode.Search => "🔍 Search",
-                    AutomationMode.Apply => "📤 Apply",
-                    AutomationMode.Full => "⚡ Full Auto",
-                    _ => "▶ Start"
-                })
-            </button>
+                    case AutomationMode.Search:
+                        <RadzenIcon Icon="search" /> <span>Search</span>
+                        break;
+                    case AutomationMode.Apply:
+                        <RadzenIcon Icon="send" /> <span>Apply</span>
+                        break;
+                    case AutomationMode.Full:
+                        <RadzenIcon Icon="flash_on" /> <span>Full Auto</span>
+                        break;
+                    default:
+                        <RadzenIcon Icon="play_arrow" /> <span>Start</span>
+                        break;
+                }
+            </RadzenButton>
         }
         <NotificationBell />
     </div>

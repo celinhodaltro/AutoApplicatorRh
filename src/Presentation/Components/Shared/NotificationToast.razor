@@ -1,0 +1,17 @@
+﻿<div class="toast-container">
+    @foreach (var toast in _toasts)
+    {
+        <div class="toast-item" style="--toast-color: @GetBorderColor(toast.Type)">
+            <div class="toast-header">
+                <span class="toast-icon"><RadzenIcon Icon="@GetIcon(toast.Type)" /></span>
+                <strong class="toast-title">@toast.Title</strong>
+                <button class="toast-close" @onclick="() => RemoveToast(toast.Id)">✕</button>
+            </div>
+            <div class="toast-message">@toast.Message</div>
+            @if (!string.IsNullOrEmpty(toast.ActionLabel) && !string.IsNullOrEmpty(toast.ActionUrl))
+            {
+                <a class="toast-action" href="@toast.ActionUrl">@toast.ActionLabel</a>
+            }
+        </div>
+    }
+</div>

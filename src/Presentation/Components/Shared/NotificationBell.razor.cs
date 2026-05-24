@@ -27,10 +27,10 @@ public partial class NotificationBell : IDisposable
 
     private static string GetIcon(NotificationType type) => type switch
     {
-        NotificationType.Success => "âœ…",
-        NotificationType.Warning => "âš ï¸",
-        NotificationType.Error => "âŒ",
-        _ => "â„¹ï¸"
+        NotificationType.Success => "check_circle",
+        NotificationType.Warning => "warning",
+        NotificationType.Error => "cancel",
+        _ => "info"
     };
 
     private static string FormatTime(DateTime timestamp)

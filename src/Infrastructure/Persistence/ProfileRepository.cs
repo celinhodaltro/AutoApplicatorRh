@@ -78,7 +78,16 @@ public sealed class ProfileRepository : IProfileRepository
     {
         try
         {
-            _context.SearchProfiles.Update(profile);
+            var existing = await _context.SearchProfiles.FindAsync([profile.Id], cancellationToken);
+            if (existing is not null)
+            {
+                _context.Entry(existing).CurrentValues.SetValues(profile);
+            }
+            else
+            {
+                _context.SearchProfiles.Attach(profile);
+                _context.Entry(profile).State = EntityState.Modified;
+            }
             await _context.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)

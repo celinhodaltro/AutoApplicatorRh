@@ -1,6 +1,6 @@
 <div class="notification-bell" @onclick="TogglePanel" @onclick:stopPropagation="true">
     <button class="bell-button" title="Notifications">
-        <span class="bell-icon">🔔</span>
+        <span class="bell-icon"><RadzenIcon Icon="notifications" /></span>
         @if (NotificationService.UnreadCount > 0)
         {
             <span class="badge">@NotificationService.UnreadCount</span>
@@ -31,7 +31,7 @@
                     @foreach (var notification in NotificationService.Notifications)
                     {
                         <div class="notification-item @(notification.IsRead ? "read" : "unread")" @onclick="() => MarkRead(notification.Id)">
-                            <div class="item-icon">@GetIcon(notification.Type)</div>
+                            <div class="item-icon"><RadzenIcon Icon="@GetIcon(notification.Type)" /></div>
                             <div class="item-content">
                                 <div class="item-title">@notification.Title</div>
                                 <div class="item-message">@notification.Message</div>

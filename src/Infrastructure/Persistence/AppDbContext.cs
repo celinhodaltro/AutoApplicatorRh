@@ -60,6 +60,7 @@ public sealed class AppDbContext : DbContext
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.FieldType).HasConversion<int>();
             entity.Property(e => e.Platform).HasConversion<int?>();
+            entity.Property(e => e.Group).HasMaxLength(200);
             SetStringListConversion(entity.Property(e => e.Options));
         });
 

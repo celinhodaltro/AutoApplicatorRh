@@ -92,7 +92,16 @@ public sealed class QuestionRepository : IQuestionRepository
     {
         try
         {
-            _context.CollectedQuestions.Update(question);
+            var existing = await _context.CollectedQuestions.FindAsync([question.Id], cancellationToken);
+            if (existing is not null)
+            {
+                _context.Entry(existing).CurrentValues.SetValues(question);
+            }
+            else
+            {
+                _context.CollectedQuestions.Attach(question);
+                _context.Entry(question).State = EntityState.Modified;
+            }
             await _context.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)

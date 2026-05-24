@@ -105,6 +105,64 @@
     margin-bottom: 16px;
 }
 
+.pipeline-container {
+    overflow-x: auto;
+    padding: 8px 0;
+    -webkit-overflow-scrolling: touch;
+}
+
+.pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    min-width: min-content;
+}
+
+.pipeline-card {
+    border-radius: 10px;
+    padding: 16px 20px;
+    min-width: 110px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: white;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pipeline-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+.pipeline-card-name {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.9;
+    margin-bottom: 6px;
+}
+
+.pipeline-card-count {
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.pipeline-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8px;
+    font-size: 22px;
+    color: #bbb;
+    font-weight: 300;
+    user-select: none;
+}
+
 @media (max-width: 900px) {
     .charts-row {
         grid-template-columns: 1fr;

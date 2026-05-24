@@ -104,73 +104,43 @@
     flex-shrink: 0;
 }
 
-.topbar-btn {
-    padding: 6px 14px;
-    border-radius: 6px;
-    border: none;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-    transition: all 0.15s;
-    white-space: nowrap;
-}
-
-.start-btn {
-    background: #667eea;
-    color: white;
-}
-
-.start-btn:hover {
-    background: #5a6fd6;
-}
-
-.start-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.stop-btn {
-    background: #f44336;
-    color: white;
-}
-
-.stop-btn:hover {
-    background: #d32f2f;
-}
-
-.topbar-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
 .mode-selector {
     display: flex;
-    gap: 2px;
+    height: 32px;
+    padding: 2px;
     background: #f0f2f5;
     border-radius: 8px;
-    padding: 2px;
+    gap: 2px;
 }
 
 .mode-btn {
-    padding: 5px 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
     border: none;
     border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
     background: transparent;
     color: #666;
-    transition: all 0.15s;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
     white-space: nowrap;
+    font-family: inherit;
+    line-height: 1;
 }
 
 .mode-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
     color: #333;
-    background: rgba(102, 126, 234, 0.08);
 }
 
 .mode-btn.active {
-    background: white;
-    color: #667eea;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    background: #1976D2;
+    color: white;
+}
+
+.mode-btn.active:hover {
+    background: #1565C0;
 }

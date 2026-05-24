@@ -21,7 +21,7 @@ else
         <div class="kpi-card purple">
             <div class="kpi-header">
                 <RadzenText TextStyle="TextStyle.Body2" class="kpi-label">Total Profiles</RadzenText>
-                <span style="font-size: 24px;">👤</span>
+                <RadzenIcon Icon="account_circle" style="font-size: 24px;" />
             </div>
             <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@_totalProfiles</RadzenText>
             <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@_activeProfiles active</RadzenText>
@@ -29,7 +29,7 @@ else
         <div class="kpi-card pink">
             <div class="kpi-header">
                 <RadzenText TextStyle="TextStyle.Body2" class="kpi-label">Total Jobs</RadzenText>
-                <span style="font-size: 24px;">💼</span>
+                <RadzenIcon Icon="work" style="font-size: 24px;" />
             </div>
             <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@_totalJobs</RadzenText>
             <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@_pendingReview pending review</RadzenText>
@@ -37,7 +37,7 @@ else
         <div class="kpi-card blue">
             <div class="kpi-header">
                 <RadzenText TextStyle="TextStyle.Body2" class="kpi-label">Applied</RadzenText>
-                <span style="font-size: 24px;">✅</span>
+                <RadzenIcon Icon="check_circle" style="font-size: 24px;" />
             </div>
             <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@_appliedJobs</RadzenText>
             <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@_approvedJobs approved to apply</RadzenText>
@@ -45,7 +45,7 @@ else
         <div class="kpi-card green">
             <div class="kpi-header">
                 <RadzenText TextStyle="TextStyle.Body2" class="kpi-label">Questions</RadzenText>
-                <span style="font-size: 24px;">❓</span>
+                <RadzenIcon Icon="help" style="font-size: 24px;" />
             </div>
             <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@_totalQuestions</RadzenText>
             <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@_unansweredQuestions unanswered</RadzenText>
@@ -54,15 +54,25 @@ else
 
     <div class="charts-row">
         <div class="chart-card">
-            <RadzenText TextStyle="TextStyle.H6" class="chart-title">📊 Jobs by Status</RadzenText>
-            <RadzenChart Style="height: 280px;">
-                <RadzenColumnSeries Data="@_jobsByStatus" CategoryProperty="Category" ValueProperty="Value" />
-                <RadzenValueAxis><RadzenAxisTitle Text="Count" /></RadzenValueAxis>
-                <RadzenCategoryAxis><RadzenAxisTitle Text="Status" /></RadzenCategoryAxis>
-            </RadzenChart>
+            <RadzenText TextStyle="TextStyle.H6" class="chart-title"><RadzenIcon Icon="bar_chart" /> Jobs by Status</RadzenText>
+            <div class="pipeline-container">
+                <div class="pipeline">
+                    @foreach (var item in _pipelineItems)
+                    {
+                        <div class="pipeline-card" style="background-color: @item.Color;">
+                            <div class="pipeline-card-name">@item.Name</div>
+                            <div class="pipeline-card-count">@item.Count</div>
+                        </div>
+                        @if (item != _pipelineItems.Last())
+                        {
+                            <div class="pipeline-arrow">→</div>
+                        }
+                    }
+                </div>
+            </div>
         </div>
         <div class="chart-card">
-            <RadzenText TextStyle="TextStyle.H6" class="chart-title">🎯 Jobs by Platform</RadzenText>
+            <RadzenText TextStyle="TextStyle.H6" class="chart-title"><RadzenIcon Icon="track_changes" /> Jobs by Platform</RadzenText>
             <RadzenChart Style="height: 280px;">
                 <RadzenPieSeries Data="@_jobsByPlatform" CategoryProperty="Category" ValueProperty="Value" />
                 <RadzenLegend Position="LegendPosition.Right" />
@@ -72,26 +82,26 @@ else
 
     <div class="charts-row">
         <div class="chart-card">
-            <RadzenText TextStyle="TextStyle.H6" class="chart-title">📝 Questions answered vs unanswered</RadzenText>
+            <RadzenText TextStyle="TextStyle.H6" class="chart-title"><RadzenIcon Icon="edit_note" /> Questions answered vs unanswered</RadzenText>
             <RadzenChart Style="height: 260px;">
                 <RadzenPieSeries Data="@_questionsStatus" CategoryProperty="Category" ValueProperty="Value" />
                 <RadzenLegend Position="LegendPosition.Right" />
             </RadzenChart>
         </div>
         <div class="actions-card">
-            <RadzenText TextStyle="TextStyle.H6" class="chart-title">⚡ Quick Actions</RadzenText>
+            <RadzenText TextStyle="TextStyle.H6" class="chart-title"><RadzenIcon Icon="flash_on" /> Quick Actions</RadzenText>
             <div class="actions-list">
                 <RadzenButton ButtonStyle="ButtonStyle.Primary" Style="width: 100%; justify-content: flex-start;" Click="@(() => Navigation.NavigateTo("/jobs"))">
-                    <span class="action-btn-content">🔍 View Pending Jobs</span>
+                    <span class="action-btn-content"><RadzenIcon Icon="search" /> View Pending Jobs</span>
                 </RadzenButton>
                 <RadzenButton ButtonStyle="ButtonStyle.Secondary" Style="width: 100%; justify-content: flex-start;" Click="@(() => Navigation.NavigateTo("/profiles"))">
-                    <span class="action-btn-content">👤 Manage Profiles</span>
+                    <span class="action-btn-content"><RadzenIcon Icon="account_circle" /> Manage Profiles</span>
                 </RadzenButton>
                 <RadzenButton ButtonStyle="ButtonStyle.Info" Style="width: 100%; justify-content: flex-start;" Click="@(() => Navigation.NavigateTo("/questions"))">
-                    <span class="action-btn-content">❓ Answer Questions (@_unansweredQuestions unanswered)</span>
+                    <span class="action-btn-content"><RadzenIcon Icon="help" /> Answer Questions (@_unansweredQuestions unanswered)</span>
                 </RadzenButton>
                 <RadzenButton ButtonStyle="ButtonStyle.Base" Style="width: 100%; justify-content: flex-start;" Click="@(() => Navigation.NavigateTo("/settings"))">
-                    <span class="action-btn-content">⚙️ Configure Settings</span>
+                    <span class="action-btn-content"><RadzenIcon Icon="settings" /> Configure Settings</span>
                 </RadzenButton>
             </div>
         </div>
@@ -99,7 +109,7 @@ else
 
     <div class="recent-card">
         <div class="recent-header">
-            <RadzenText TextStyle="TextStyle.H6" class="chart-title">📋 Recent Jobs</RadzenText>
+            <RadzenText TextStyle="TextStyle.H6" class="chart-title"><RadzenIcon Icon="format_list_bulleted" /> Recent Jobs</RadzenText>
             <RadzenButton Text="View All" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Base" Click="@(() => Navigation.NavigateTo("/jobs"))" />
         </div>
 

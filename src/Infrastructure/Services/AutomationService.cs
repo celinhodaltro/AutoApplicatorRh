@@ -1,10 +1,10 @@
 using System.Diagnostics;
-using AutoApplicator.Application.Commands.Jobs;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
 using AutoApplicator.Domain.Interfaces;
 using AutoApplicator.Infrastructure.Automation.Platforms;
-using MediatR;
+using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn;
+using AutoApplicator.Infrastructure.Services.Exceptions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -17,6 +17,8 @@ public sealed class AutomationService
     private readonly PlatformAdapterFactory _adapterFactory;
     private readonly NotificationService _notifications;
     private readonly ILogger<AutomationService> _logger;
+    private readonly LinkedInApplicator _linkedInApplicator;
+    private readonly ExceptionHandlerService _exceptionHandler;
     private CancellationTokenSource? _cts;
 
     public bool IsRunning { get; private set; }
@@ -29,17 +31,18 @@ public sealed class AutomationService
         PlaywrightService playwrightService,
         PlatformAdapterFactory adapterFactory,
         NotificationService notifications,
-        ILogger<AutomationService> logger)
+        ILogger<AutomationService> logger,
+        LinkedInApplicator linkedInApplicator,
+        ExceptionHandlerService exceptionHandler)
     {
         _scopeFactory = scopeFactory;
         _playwrightService = playwrightService;
         _adapterFactory = adapterFactory;
         _notifications = notifications;
         _logger = logger;
+        _linkedInApplicator = linkedInApplicator;
+        _exceptionHandler = exceptionHandler;
     }
-
-    private IMediator GetMediator() =>
-        _scopeFactory.CreateScope().ServiceProvider.GetRequiredService<IMediator>();
 
     public async Task StartAsync(AutomationMode mode = AutomationMode.Search, bool globalEasyApply = false)
     {
@@ -88,11 +91,18 @@ public sealed class AutomationService
             _notifications.Add(NotificationType.Warning, "Automation Cancelled", $"Stopped after {stopwatch.Elapsed.TotalMinutes:F1} min.");
             UpdateStatus("Cancelled.", 0, 0);
         }
+        catch (AutomationException autoEx)
+        {
+            stopwatch.Stop();
+            _exceptionHandler.Handle(autoEx);
+            UpdateStatus(autoEx.UserMessage, 0, 0);
+        }
         catch (Exception ex)
         {
             stopwatch.Stop();
             _logger.LogError(ex, "===== AUTOMATION FAILED [{Mode}] after {Elapsed} =====", modeLabel, stopwatch.Elapsed);
-            _notifications.Add(NotificationType.Error, $"{modeLabel} Failed", ex.Message);
+            if (!_exceptionHandler.TryHandle(ex))
+                _notifications.Add(NotificationType.Error, $"{modeLabel} Failed", ex.Message);
             UpdateStatus($"Error: {ex.Message}", 0, 0);
         }
         finally
@@ -122,12 +132,7 @@ public sealed class AutomationService
         _logger.LogInformation("Found {ProfileCount} enabled profile(s) to search", profiles.Count);
 
         if (profiles.Count == 0)
-        {
-            _logger.LogWarning("No enabled profiles found.");
-            _notifications.Add(NotificationType.Warning, "Search", "No enabled profiles. Create one first.", "Profiles", "/profiles");
-            UpdateStatus("No enabled profiles.", 0, 0);
-            return;
-        }
+            throw new NoEnabledProfilesException();
 
         await _playwrightService.InitializeAsync();
         var page = _playwrightService.GetPage()
@@ -164,12 +169,7 @@ public sealed class AutomationService
         _logger.LogInformation("Found {Count} approved job(s) to apply", approvedJobs.Count);
 
         if (approvedJobs.Count == 0)
-        {
-            _logger.LogWarning("No approved jobs to apply. Approve jobs first.");
-            _notifications.Add(NotificationType.Warning, "Apply", "No approved jobs. Approve some first.", "Jobs", "/jobs");
-            UpdateStatus("No approved jobs.", 0, 0);
-            return;
-        }
+            throw new NoApprovedJobsException();
 
         await _playwrightService.InitializeAsync();
         var page = _playwrightService.GetPage()
@@ -178,6 +178,8 @@ public sealed class AutomationService
         UpdateStatus($"Applying to {approvedJobs.Count} job(s)...", 0, approvedJobs.Count);
 
         var appliedCount = 0;
+        var pendingCount = 0;
+
         for (var i = 0; i < approvedJobs.Count; i++)
         {
             if (token.IsCancellationRequested) break;
@@ -188,31 +190,69 @@ public sealed class AutomationService
 
             try
             {
-                var mediator = GetMediator();
-                var result = await mediator.Send(new ApplyToJobCommand(job.Id));
+                await page.GotoAsync(job.Url, new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded });
+                await Task.Delay(3000, token);
 
-                if (result.Status == JobStatus.Applied)
+                ApplyResult result;
+
+                if (job.Platform == PlatformType.LinkedIn)
                 {
-                    appliedCount++;
-                    _logger.LogInformation("[{Current}/{Total}] ✅ Applied to '{Title}'", i + 1, approvedJobs.Count, job.Title);
-                    _notifications.Add(NotificationType.Success, "Applied", $"{job.Title} at {job.Company}");
+                    result = await _linkedInApplicator.ApplyAsync(page, job);
                 }
                 else
                 {
-                    _logger.LogWarning("[{Current}/{Total}] ❌ Failed to apply to '{Title}'", i + 1, approvedJobs.Count, job.Title);
+                    _logger.LogWarning("[{Current}/{Total}] Apply not yet supported for {Platform}", i + 1, approvedJobs.Count, job.Platform);
+                    result = new ApplyResult(false, $"Apply not supported for {job.Platform}");
+                }
+
+                using (var scope = _scopeFactory.CreateScope())
+                {
+                    var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
+                    var dbJob = await jobRepo.GetByIdAsync(job.Id, default);
+                    if (dbJob is not null)
+                    {
+                        if (result.Success)
+                        {
+                            dbJob.Status = JobStatus.Applied;
+                            dbJob.AppliedAt = DateTime.UtcNow;
+                            dbJob.ApplicationAnswers = result.AnswersUsed;
+                            appliedCount++;
+                            _logger.LogInformation("[{Current}/{Total}] ✅ Applied: '{Title}'", i + 1, approvedJobs.Count, job.Title);
+                            _notifications.Add(NotificationType.Success, "Applied", $"{job.Title} at {job.Company}");
+                        }
+                        else if (result.NeedsManualIntervention)
+                        {
+                            dbJob.Status = JobStatus.Pending;
+                            dbJob.UserNotes = result.ErrorMessage;
+                            pendingCount++;
+                            _logger.LogInformation("[{Current}/{Total}] ⏭️ Saved for later: '{Title}' (needs answers)", i + 1, approvedJobs.Count, job.Title);
+                            _notifications.Add(NotificationType.Warning, "Pending", $"{job.Title} — configure answers in Questions tab");
+                        }
+                        else
+                        {
+                            dbJob.Status = JobStatus.Error;
+                            dbJob.UserNotes = result.ErrorMessage;
+                            _logger.LogWarning("[{Current}/{Total}] ❌ Failed: '{Title}': {Error}", i + 1, approvedJobs.Count, job.Title, result.ErrorMessage);
+                        }
+                        dbJob.UpdatedAt = DateTime.UtcNow;
+                        await jobRepo.UpdateAsync(dbJob, default);
+                    }
                 }
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[{Current}/{Total}] Error applying to '{Title}'", i + 1, approvedJobs.Count, job.Title);
             }
         }
 
-        _logger.LogInformation("Apply complete: {Applied}/{Total} job(s) applied", appliedCount, approvedJobs.Count);
+        _logger.LogInformation("Apply complete: {Applied} applied, {Pending} pending, {Total} total", appliedCount, pendingCount, approvedJobs.Count);
 
         if (appliedCount > 0)
             _notifications.Add(NotificationType.Success, "Apply Complete", $"Applied to {appliedCount} job(s).", "View Jobs", "/jobs");
-        else
+        if (pendingCount > 0)
+            _notifications.Add(NotificationType.Warning, "Pending Answers", $"{pendingCount} job(s) need answers configured.", "Questions", "/questions");
+        if (appliedCount == 0 && pendingCount == 0)
             _notifications.Add(NotificationType.Warning, "Apply Complete", "No jobs were applied.");
     }
 
@@ -235,12 +275,7 @@ public sealed class AutomationService
 
             var auth = await adapter.IsAuthenticatedAsync(page);
             if (!auth.IsAuthenticated)
-            {
-                _logger.LogWarning("[{Current}/{Total}] {Platform}: login required", current, total, profile.Platform);
-                _notifications.Add(NotificationType.Error, $"{profile.Platform} Login", auth.Message, "Login", auth.LoginUrl);
-                UpdateStatus($"Login needed for {profile.Name}", current, total);
-                return 0;
-            }
+                throw new LoginRequiredException(profile.Platform.ToString(), auth.LoginUrl);
 
             UpdateStatus($"Extracting listings for {profile.Name}...", current, total);
             var extractedJobs = await adapter.ExtractListingsAsync(page);

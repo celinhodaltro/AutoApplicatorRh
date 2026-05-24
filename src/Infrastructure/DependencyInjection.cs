@@ -1,6 +1,7 @@
 using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Interfaces;
 using AutoApplicator.Infrastructure.Automation.Platforms;
+using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn;
 using AutoApplicator.Infrastructure.Persistence;
 using AutoApplicator.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +24,8 @@ public static class DependencyInjection
         services.AddSingleton<AutomationService>();
         services.AddSingleton<NotificationService>();
         services.AddSingleton<PlatformAdapterFactory>();
+        services.AddSingleton<LinkedInApplicator>();
+        services.AddSingleton<ExceptionHandlerService>();
 
         return services;
     }
