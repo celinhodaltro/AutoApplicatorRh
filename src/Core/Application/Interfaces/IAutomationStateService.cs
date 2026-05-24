@@ -5,7 +5,8 @@ public interface IAutomationStateService
     bool IsRunning { get; }
     AutomationStatusInfo CurrentStatus { get; }
     event Action? StatusChanged;
-    Task StartAsync(AutomationMode mode, bool globalEasyApply = false);
+    Task StartAsync(AutomationMode mode, bool globalEasyApply = false,
+        int maxSearchJobs = 25, int maxApplyJobs = 10, int maxFullJobs = 20);
     void Stop();
 }
 

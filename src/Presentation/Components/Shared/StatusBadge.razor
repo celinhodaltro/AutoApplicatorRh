@@ -11,12 +11,10 @@
     private BadgeStyle GetStyle() => Status switch
     {
         JobStatus.New => BadgeStyle.Info,
-        JobStatus.Reviewed => BadgeStyle.Warning,
         JobStatus.Approved => BadgeStyle.Success,
         JobStatus.Rejected => BadgeStyle.Danger,
         JobStatus.Applied => BadgeStyle.Primary,
         JobStatus.Pending => BadgeStyle.Warning,
-        JobStatus.Skipped => BadgeStyle.Light,
         JobStatus.Error => BadgeStyle.Danger,
         _ => BadgeStyle.Light,
     };

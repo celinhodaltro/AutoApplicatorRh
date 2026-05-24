@@ -35,9 +35,12 @@
         <RadzenText TextStyle="TextStyle.Body2" style="font-weight: 500; margin-bottom: 4px;">Exclude Terms (comma separated)</RadzenText>
         <RadzenTextBox @bind-Value="@_formExcludeTerms" Placeholder="e.g. Java, PHP" style="width: 100%;" />
     </div>
-    <div style="display: flex; flex-direction: column; gap: 8px; justify-content: center;">
-        <RadzenCheckBox @bind-Value="@_editingProfile.EasyApplyOnly" Caption="Easy Apply Only" />
-        <RadzenCheckBox @bind-Value="@_editingProfile.RemoteOnly" Caption="Remote Only" />
+    <div style="display: flex; flex-direction: column; gap: 12px; justify-content: center;">
+        <div>
+            <RadzenText TextStyle="TextStyle.Body2" style="font-weight:500; margin-bottom:4px;">Application Filters</RadzenText>
+            <RadzenCheckBox @bind-Value="@_editingProfile.EasyApplyOnly" Caption="Easy Apply Only — skip jobs that don't have Easy Apply" />
+            <RadzenCheckBox @bind-Value="@_editingProfile.RemoteOnly" Caption="Remote Only — show only remote jobs" />
+        </div>
     </div>
 </div>
 <div style="margin-top: 24px; display: flex; gap: 8px; justify-content: flex-end;">

@@ -126,7 +126,7 @@ else
     </RadzenFieldset>
 
     <div style="display: flex; gap: 8px; margin-top: 24px;">
-        @if (_job.Status is JobStatus.New or JobStatus.Reviewed)
+        @if (_job.Status is JobStatus.New)
         {
             <RadzenButton Text="Approve" ButtonStyle="ButtonStyle.Success" Click="@Approve" />
             <RadzenButton Text="Reject" ButtonStyle="ButtonStyle.Warning" Click="@Reject" />

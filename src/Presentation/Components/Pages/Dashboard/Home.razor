@@ -50,35 +50,34 @@ else
         </div>
     </div>
 
-    <div class="charts-row">
-        <div class="chart-card">
-            <RadzenText TextStyle="TextStyle.H6" class="chart-title"><RadzenIcon Icon="bar_chart" /> Jobs by Status</RadzenText>
-            <div class="pipeline-container">
-                <div class="pipeline">
-                    @foreach (var item in _pipelineItems)
-                    {
-                        <div class="pipeline-card" style="background-color: @item.Color;">
-                            <div class="pipeline-card-name">@item.Name</div>
-                            <div class="pipeline-card-count">@item.Count</div>
-                        </div>
-                        @if (item != _pipelineItems.Last())
-                        {
-                            <div class="pipeline-arrow">→</div>
-                        }
-                    }
+    @* Pipeline - full width *@
+    <div class="pipeline-fullwidth">
+        <RadzenText TextStyle="TextStyle.H6" class="pipeline-title">📊 Job Pipeline</RadzenText>
+        <div class="pipeline-track">
+            @foreach (var stage in _pipelineStages)
+            {
+                <div class="pipeline-stage @stage.Status.ToString().ToLower()">
+                    <div class="stage-count">@stage.Count</div>
+                    <div class="stage-label">@stage.Status</div>
                 </div>
-            </div>
-        </div>
-        <div class="chart-card">
-            <RadzenText TextStyle="TextStyle.H6" class="chart-title"><RadzenIcon Icon="track_changes" /> Jobs by Platform</RadzenText>
-            <RadzenChart Style="height: 280px;">
-                <RadzenPieSeries Data="@_jobsByPlatform" CategoryProperty="Category" ValueProperty="Value" />
-                <RadzenLegend Position="LegendPosition.Right" />
-            </RadzenChart>
+                @if (stage != _pipelineStages.Last())
+                {
+                    <div class="pipeline-arrow">→</div>
+                }
+            }
         </div>
     </div>
 
+    @* Charts row: Status % + Questions *@
     <div class="charts-row">
+        <div class="chart-card">
+            <RadzenText TextStyle="TextStyle.H6" class="chart-title">📈 Status Distribution</RadzenText>
+            <RadzenChart Style="height: 280px;">
+                <RadzenColumnSeries Data="@_jobsByStatusPercentage" CategoryProperty="Category" ValueProperty="Value" />
+                <RadzenValueAxis><RadzenAxisTitle Text="% of Jobs" /></RadzenValueAxis>
+                <RadzenCategoryAxis><RadzenAxisTitle Text="Status" /></RadzenCategoryAxis>
+            </RadzenChart>
+        </div>
         <div class="chart-card">
             <RadzenText TextStyle="TextStyle.H6" class="chart-title"><RadzenIcon Icon="edit_note" /> Questions answered vs unanswered</RadzenText>
             <RadzenChart Style="height: 260px;">
@@ -86,6 +85,10 @@ else
                 <RadzenLegend Position="LegendPosition.Right" />
             </RadzenChart>
         </div>
+    </div>
+
+    @* Charts row: Quick Actions + (empty or keep) *@
+    <div class="charts-row">
         <div class="actions-card">
             <RadzenText TextStyle="TextStyle.H6" class="chart-title"><RadzenIcon Icon="flash_on" /> Quick Actions</RadzenText>
             <div class="actions-list">

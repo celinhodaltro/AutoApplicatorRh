@@ -24,10 +24,11 @@ public partial class Home
     private int _unansweredQuestions;
 
     private List<ChartDataItem> _jobsByStatus = [];
+    private List<ChartDataItem> _jobsByStatusPercentage = [];
     private List<ChartDataItem> _jobsByPlatform = [];
     private List<ChartDataItem> _questionsStatus = [];
     private List<JobListing> _recentJobs = [];
-    private List<PipelineItem> _pipelineItems = [];
+    private List<PipelineStage> _pipelineStages = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -61,8 +62,26 @@ public partial class Home
             .Select(x => new ChartDataItem { Category = x.Category, Value = x.Value })
             .ToList();
 
-        _pipelineItems = data.PipelineItems
-            .Select(p => new PipelineItem { Name = p.Name, Count = p.Count, Color = p.Color })
+        // Calcular percentuais a partir dos dados carregados
+        var totalJobs = data.TotalJobs > 0 ? data.TotalJobs : 1;
+        _jobsByStatusPercentage = data.JobsByStatus
+            .Select(x => new ChartDataItem
+            {
+                Category = x.Category,
+                Value = (int)Math.Round((double)x.Value / totalJobs * 100)
+            })
+            .Where(x => x.Value > 0)
+            .ToList();
+
+        // Converter PipelineItems para PipelineStages
+        var stageOrder = new[] { JobStatus.New, JobStatus.Approved, JobStatus.Pending, JobStatus.Applied, JobStatus.Rejected };
+        _pipelineStages = stageOrder
+            .Select(status => new PipelineStage
+            {
+                Status = status,
+                Count = data.JobsByStatus.FirstOrDefault(x => x.Category == status.ToString())?.Value ?? 0
+            })
+            .Where(s => s.Count > 0)
             .ToList();
     }
 
@@ -72,10 +91,9 @@ public partial class Home
         public int Value { get; set; }
     }
 
-    private class PipelineItem
+    private class PipelineStage
     {
-        public string Name { get; set; } = string.Empty;
+        public JobStatus Status { get; set; }
         public int Count { get; set; }
-        public string Color { get; set; } = string.Empty;
     }
 }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading.Channels;
 using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
@@ -42,7 +43,8 @@ public sealed class AutomationService : IAutomationStateService
         _exceptionHandler = exceptionHandler;
     }
 
-    public async Task StartAsync(AutomationMode mode = AutomationMode.Search, bool globalEasyApply = false)
+    public async Task StartAsync(AutomationMode mode = AutomationMode.Search, bool globalEasyApply = false,
+        int maxSearchJobs = 25, int maxApplyJobs = 10, int maxFullJobs = 20)
     {
         if (IsRunning)
         {
@@ -72,10 +74,23 @@ public sealed class AutomationService : IAutomationStateService
         try
         {
             if (mode is AutomationMode.Search or AutomationMode.Full)
-                await RunSearchAsync(token, globalEasyApply);
+            {
+                if (mode == AutomationMode.Full)
+                {
+                    await RunFullAsync(token, globalEasyApply, maxFullJobs);
+                }
+                else
+                {
+                    var searchLimit = maxSearchJobs;
+                    await RunSearchAsync(token, globalEasyApply, searchLimit);
+                }
+            }
 
-            if (mode is AutomationMode.Apply or AutomationMode.Full && !token.IsCancellationRequested)
-                await RunApplyAsync(token);
+            if (mode is AutomationMode.Apply && !token.IsCancellationRequested)
+            {
+                var applyLimit = maxApplyJobs;
+                await RunApplyAsync(token, applyLimit);
+            }
 
             stopwatch.Stop();
             _logger.LogInformation("===== AUTOMATION COMPLETED [{Mode}] in {Elapsed} =====", modeLabel, stopwatch.Elapsed);
@@ -118,7 +133,214 @@ public sealed class AutomationService : IAutomationStateService
         UpdateStatus("Stopping...", 0, 0);
     }
 
-    private async Task RunSearchAsync(CancellationToken token, bool globalEasyApply)
+    private async Task RunFullAsync(CancellationToken token, bool globalEasyApply, int maxJobs)
+    {
+        var jobChannel = Channel.CreateBounded<ExtractedJob>(new BoundedChannelOptions(20)
+        {
+            FullMode = BoundedChannelFullMode.Wait
+        });
+
+        var searchTask = RunFullSearchAsync(jobChannel.Writer, token, globalEasyApply, maxJobs);
+        var applyTask = RunFullApplyAsync(jobChannel.Reader, token);
+
+        await Task.WhenAll(searchTask, applyTask);
+    }
+
+    private async Task RunFullSearchAsync(ChannelWriter<ExtractedJob> writer, CancellationToken token, bool globalEasyApply, int maxJobs)
+    {
+        List<SearchProfile> profiles;
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var profileRepo = scope.ServiceProvider.GetRequiredService<IProfileRepository>();
+            profiles = (await profileRepo.GetEnabledProfilesAsync()).ToList();
+        }
+
+        _logger.LogInformation("Found {ProfileCount} enabled profile(s) for Full Search", profiles.Count);
+
+        if (profiles.Count == 0)
+            throw new NoEnabledProfilesException();
+
+        await _playwrightService.InitializeAsync();
+        var page = _playwrightService.GetPage()
+            ?? throw new InvalidOperationException("Playwright page not available");
+
+        UpdateStatus($"Full Search: searching {profiles.Count} profile(s)...", 0, profiles.Count);
+
+        var totalFound = 0;
+        for (var i = 0; i < profiles.Count; i++)
+        {
+            if (token.IsCancellationRequested) break;
+
+            var profile = profiles[i];
+            var adapter = _adapterFactory.Create(profile.Platform);
+
+            _logger.LogInformation("[Full Search] Searching '{ProfileName}' on {Platform}", profile.Name, profile.Platform);
+            UpdateStatus($"Full Search: {profile.Name} on {profile.Platform}...", i + 1, profiles.Count);
+
+            try
+            {
+                var searchUrl = await NavigateToSearchUrlAsync(adapter, profile, page, i + 1, profiles.Count, token);
+                await CheckAuthenticationAsync(adapter, page, profile);
+
+                UpdateStatus($"Full Search: extracting listings for {profile.Name}...", i + 1, profiles.Count);
+                var extractedJobs = await adapter.ExtractListingsAsync(page);
+
+                _logger.LogInformation("[Full Search] Extracted {Total} jobs on {Platform} for '{Name}'", extractedJobs.Count, profile.Platform, profile.Name);
+
+                var limit = Math.Min(extractedJobs.Count, maxJobs);
+                for (var j = 0; j < limit; j++)
+                {
+                    if (token.IsCancellationRequested) break;
+
+                    var extracted = extractedJobs[j];
+
+                    UpdateStatus($"Full Search: checking {extracted.Title} ({j + 1}/{limit})", i + 1, profiles.Count);
+
+                    var (details, updatedExtracted) = await FetchJobDetailsAsync(page, adapter, extracted, searchUrl, token);
+                    extracted = updatedExtracted;
+
+                    var isEasyApply = extracted.EasyApply;
+
+                    if (globalEasyApply && !isEasyApply)
+                    {
+                        _logger.LogInformation("[Full Search] Skipping non-Easy-Apply: '{Title}'", extracted.Title);
+                        continue;
+                    }
+
+                    if (isEasyApply)
+                    {
+                        // Send to apply queue via channel
+                        _logger.LogInformation("[Full Search] Found Easy Apply job '{Title}' at {Company}, sending to apply queue", extracted.Title, extracted.Company);
+                        await writer.WriteAsync(extracted, token);
+                        totalFound++;
+                    }
+                    else
+                    {
+                        // Save as New (same as regular search)
+                        _logger.LogInformation("[Full Search] Saving non-Easy-Apply job: '{Title}' at {Company}", extracted.Title, extracted.Company);
+                        using var scope = _scopeFactory.CreateScope();
+                        var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
+                        await SaveJobAsync(jobRepo, extracted, details, profile, false);
+                        totalFound++;
+                    }
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Full Search] Failed for '{Name}'", profile.Name);
+                _notifications.Add(NotificationType.Error, $"{profile.Platform} Error", $"{profile.Name}: {ex.Message}");
+                UpdateStatus($"Full Search error: {profile.Name}", i + 1, profiles.Count);
+            }
+        }
+
+        writer.Complete();
+        _logger.LogInformation("Full Search complete: {TotalJobs} job(s) sent to apply queue", totalFound);
+    }
+
+    private async Task RunFullApplyAsync(ChannelReader<ExtractedJob> reader, CancellationToken token)
+    {
+        var appliedCount = 0;
+        var pendingCount = 0;
+        var errorCount = 0;
+        var totalProcessed = 0;
+
+        await foreach (var extracted in reader.ReadAllAsync(token))
+        {
+            totalProcessed++;
+            UpdateStatus($"Full Apply: processing {extracted.Title} ({totalProcessed})", totalProcessed, 0);
+
+            Microsoft.Playwright.IPage? tab = null;
+            try
+            {
+                // Create new tab
+                tab = await _playwrightService.CreateNewPageAsync();
+                _logger.LogInformation("[Full Apply] Processing job '{Title}' at {Company} in new tab", extracted.Title, extracted.Company);
+
+                // Navigate to job URL
+                await tab.GotoAsync(extracted.Url, new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded });
+                await Task.Delay(3000, token);
+
+                // Convert ExtractedJob to JobListing for the applicator
+                var jobListing = new JobListing
+                {
+                    Id = Guid.NewGuid(),
+                    ExternalId = extracted.ExternalId,
+                    Platform = PlatformType.LinkedIn,
+                    Url = extracted.Url,
+                    Title = extracted.Title,
+                    Company = extracted.Company,
+                    Location = extracted.Location,
+                    EasyApply = true,
+                    Status = JobStatus.New,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                // Apply using LinkedInApplicator
+                using var scope = _scopeFactory.CreateScope();
+                var linkedInApplicator = scope.ServiceProvider.GetRequiredService<LinkedInApplicator>();
+                var result = await linkedInApplicator.ApplyAsync(tab, jobListing);
+
+                if (result.Success)
+                {
+                    appliedCount++;
+                    jobListing.Status = JobStatus.Applied;
+                    jobListing.AppliedAt = DateTime.UtcNow;
+                    jobListing.ApplicationAnswers = result.AnswersUsed;
+                    _logger.LogInformation("[Full Apply] ✅ Applied: '{Title}' at {Company}", extracted.Title, extracted.Company);
+                    _notifications.Add(NotificationType.Success, "Applied", $"{extracted.Title} at {extracted.Company}");
+                }
+                else if (result.NeedsManualIntervention)
+                {
+                    pendingCount++;
+                    jobListing.Status = JobStatus.Pending;
+                    jobListing.UserNotes = result.ErrorMessage;
+                    _logger.LogInformation("[Full Apply] ⏭️ Pending: '{Title}' (needs answers)", extracted.Title);
+                    _notifications.Add(NotificationType.Warning, "Pending", $"{extracted.Title} — configure answers");
+                }
+                else
+                {
+                    errorCount++;
+                    jobListing.Status = JobStatus.Error;
+                    jobListing.UserNotes = result.ErrorMessage;
+                    _logger.LogWarning("[Full Apply] ❌ Failed: '{Title}' at {Company}: {Error}", extracted.Title, extracted.Company, result.ErrorMessage);
+                }
+
+                // Save job result
+                using var saveScope = _scopeFactory.CreateScope();
+                var jobRepo = saveScope.ServiceProvider.GetRequiredService<IJobRepository>();
+                await jobRepo.AddAsync(jobListing, token);
+
+                // Delay before next tab to avoid overloading LinkedIn
+                if (!token.IsCancellationRequested)
+                    await Task.Delay(2000 + Random.Shared.Next(0, 2000), token);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                errorCount++;
+                _logger.LogError(ex, "[Full Apply] Error processing '{Title}'", extracted.Title);
+            }
+            finally
+            {
+                if (tab is not null)
+                {
+                    try { await tab.CloseAsync(); } catch { /* ignore close error */ }
+                }
+            }
+        }
+
+        _logger.LogInformation("Full Apply complete: {Applied} applied, {Pending} pending, {Errors} errors, {Total} total",
+            appliedCount, pendingCount, errorCount, totalProcessed);
+
+        if (appliedCount > 0)
+            _notifications.Add(NotificationType.Success, "Full Apply Complete", $"Applied to {appliedCount} job(s).", "View Jobs", "/jobs");
+        if (pendingCount > 0)
+            _notifications.Add(NotificationType.Warning, "Pending Answers", $"{pendingCount} job(s) need answers configured.", "Questions", "/questions");
+    }
+
+    private async Task RunSearchAsync(CancellationToken token, bool globalEasyApply, int maxJobs = 25)
     {
         List<SearchProfile> profiles;
         using (var scope = _scopeFactory.CreateScope())
@@ -142,7 +364,7 @@ public sealed class AutomationService : IAutomationStateService
         for (var i = 0; i < profiles.Count; i++)
         {
             if (token.IsCancellationRequested) break;
-            var result = await SearchProfileAsync(profiles[i], page, i + 1, profiles.Count, globalEasyApply, token);
+            var result = await SearchProfileAsync(profiles[i], page, i + 1, profiles.Count, globalEasyApply, maxJobs, token);
             totalFound += result;
         }
 
@@ -154,36 +376,37 @@ public sealed class AutomationService : IAutomationStateService
             _notifications.Add(NotificationType.Info, "Search Complete", "No new jobs found.");
     }
 
-    private async Task RunApplyAsync(CancellationToken token)
+    private async Task RunApplyAsync(CancellationToken token, int maxJobs = 10)
     {
-        var approvedJobs = await GetApprovedJobsAsync();
+        var jobsToApply = await GetJobsToApplyAsync();
 
-        _logger.LogInformation("Found {Count} approved job(s) to apply", approvedJobs.Count);
+        _logger.LogInformation("Found {Count} job(s) to apply", jobsToApply.Count);
 
-        if (approvedJobs.Count == 0)
+        if (jobsToApply.Count == 0)
             throw new NoApprovedJobsException();
 
         await _playwrightService.InitializeAsync();
         var page = _playwrightService.GetPage()
             ?? throw new InvalidOperationException("Playwright page not available");
 
-        UpdateStatus($"Applying to {approvedJobs.Count} job(s)...", 0, approvedJobs.Count);
+        UpdateStatus($"Applying to {jobsToApply.Count} job(s)...", 0, jobsToApply.Count);
 
         var appliedCount = 0;
         var pendingCount = 0;
 
-        for (var i = 0; i < approvedJobs.Count; i++)
+        var limit = Math.Min(jobsToApply.Count, maxJobs);
+        for (var i = 0; i < limit; i++)
         {
             if (token.IsCancellationRequested) break;
-            var job = approvedJobs[i];
+            var job = jobsToApply[i];
 
-            UpdateStatus($"Applying: {job.Title} ({i + 1}/{approvedJobs.Count})", i + 1, approvedJobs.Count);
-            _logger.LogInformation("[{Current}/{Total}] Applying to '{Title}' at {Company}", i + 1, approvedJobs.Count, job.Title, job.Company);
+            UpdateStatus($"Applying: {job.Title} ({i + 1}/{jobsToApply.Count})", i + 1, jobsToApply.Count);
+            _logger.LogInformation("[{Current}/{Total}] Applying to '{Title}' at {Company}", i + 1, jobsToApply.Count, job.Title, job.Company);
 
             try
             {
-                var result = await ProcessJobApplicationAsync(page, job, i + 1, approvedJobs.Count, token);
-                await UpdateJobAfterApplyAsync(job, result, i + 1, approvedJobs.Count);
+                var result = await ProcessJobApplicationAsync(page, job, i + 1, jobsToApply.Count, token);
+                await UpdateJobAfterApplyAsync(job, result, i + 1, jobsToApply.Count);
 
                 if (result.Success) appliedCount++;
                 else if (result.NeedsManualIntervention) pendingCount++;
@@ -191,11 +414,11 @@ public sealed class AutomationService : IAutomationStateService
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[{Current}/{Total}] Error applying to '{Title}'", i + 1, approvedJobs.Count, job.Title);
+                _logger.LogError(ex, "[{Current}/{Total}] Error applying to '{Title}'", i + 1, jobsToApply.Count, job.Title);
             }
         }
 
-        _logger.LogInformation("Apply complete: {Applied} applied, {Pending} pending, {Total} total", appliedCount, pendingCount, approvedJobs.Count);
+        _logger.LogInformation("Apply complete: {Applied} applied, {Pending} pending, {Total} total", appliedCount, pendingCount, jobsToApply.Count);
 
         if (appliedCount > 0)
             _notifications.Add(NotificationType.Success, "Apply Complete", $"Applied to {appliedCount} job(s).", "View Jobs", "/jobs");
@@ -205,12 +428,12 @@ public sealed class AutomationService : IAutomationStateService
             _notifications.Add(NotificationType.Warning, "Apply Complete", "No jobs were applied.");
     }
 
-    private async Task<List<JobListing>> GetApprovedJobsAsync()
+    private async Task<List<JobListing>> GetJobsToApplyAsync()
     {
         using var scope = _scopeFactory.CreateScope();
         var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
         var allJobs = (await jobRepo.GetAllAsync(default)).ToList();
-        return allJobs.Where(j => j.Status == JobStatus.Approved).ToList();
+        return allJobs.Where(j => j.Status is JobStatus.New or JobStatus.Approved).ToList();
     }
 
     private async Task<ApplyResult> ProcessJobApplicationAsync(Microsoft.Playwright.IPage page, JobListing job, int current, int total, CancellationToken token)
@@ -264,7 +487,7 @@ public sealed class AutomationService : IAutomationStateService
 
     private async Task<int> SearchProfileAsync(
         SearchProfile profile, Microsoft.Playwright.IPage page,
-        int current, int total, bool globalEasyApply, CancellationToken token)
+        int current, int total, bool globalEasyApply, int maxJobs, CancellationToken token)
     {
         var adapter = _adapterFactory.Create(profile.Platform);
 
@@ -285,7 +508,8 @@ public sealed class AutomationService : IAutomationStateService
             var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
 
             var savedCount = 0;
-            for (var i = 0; i < extractedJobs.Count; i++)
+            var limit = Math.Min(extractedJobs.Count, maxJobs);
+            for (var i = 0; i < limit; i++)
             {
                 if (token.IsCancellationRequested) break;
 

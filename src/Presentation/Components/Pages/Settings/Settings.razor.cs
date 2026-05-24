@@ -10,6 +10,13 @@ public partial class Settings
     private int _maxApplications = 100;
     private bool _headlessMode = true;
 
+    private int _maxSearchJobs = 25;
+    private int _maxApplyJobs = 10;
+    private int _maxFullJobs = 20;
+    private bool _unlimitedSearch;
+    private bool _unlimitedApply;
+    private bool _unlimitedFull;
+
     private bool _logView = true;
     private List<string> _logLines = [];
 
@@ -22,6 +29,13 @@ public partial class Settings
             _profileCooldown = Preferences.Get("profile_cooldown", 30);
             _maxApplications = Preferences.Get("max_applications", 100);
             _headlessMode = Preferences.Get("headless_mode", true);
+
+            _maxSearchJobs = Preferences.Get("max_search_jobs", 25);
+            if (_maxSearchJobs >= 9999) { _unlimitedSearch = true; _maxSearchJobs = 25; }
+            _maxApplyJobs = Preferences.Get("max_apply_jobs", 10);
+            if (_maxApplyJobs >= 9999) { _unlimitedApply = true; _maxApplyJobs = 10; }
+            _maxFullJobs = Preferences.Get("max_full_jobs", 20);
+            if (_maxFullJobs >= 9999) { _unlimitedFull = true; _maxFullJobs = 20; }
         }
         catch
         {
@@ -38,6 +52,10 @@ public partial class Settings
             Preferences.Set("profile_cooldown", _profileCooldown);
             Preferences.Set("max_applications", _maxApplications);
             Preferences.Set("headless_mode", _headlessMode);
+
+            Preferences.Set("max_search_jobs", _unlimitedSearch ? 9999 : _maxSearchJobs);
+            Preferences.Set("max_apply_jobs", _unlimitedApply ? 9999 : _maxApplyJobs);
+            Preferences.Set("max_full_jobs", _unlimitedFull ? 9999 : _maxFullJobs);
         }
         catch { /* Preferences save failed */ }
     }

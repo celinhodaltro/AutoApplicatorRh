@@ -221,6 +221,17 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
         }
     }
 
+    public async Task<IPage> CreateNewPageAsync()
+    {
+        await EnsureInitializedAsync();
+
+        var page = await _context!.NewPageAsync();
+        await page.AddInitScriptAsync(@"Object.defineProperty(navigator, 'webdriver', { get: () => undefined });");
+        page.SetDefaultTimeout(DefaultTimeout);
+        page.SetDefaultNavigationTimeout(DefaultTimeout);
+        return page;
+    }
+
     public IPage? GetPage()
     {
         return _page;

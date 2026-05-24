@@ -1,3 +1,5 @@
+using Microsoft.Playwright;
+
 namespace AutoApplicator.Application.Interfaces;
 
 public interface IPlaywrightService
@@ -10,4 +12,5 @@ public interface IPlaywrightService
     Task SelectOptionAsync(string selector, string value);
     Task<bool> IsVisibleAsync(string selector);
     Task ScreenshotAsync(string path);
+    Task<IPage> CreateNewPageAsync();
 }

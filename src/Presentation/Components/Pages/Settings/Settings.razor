@@ -17,12 +17,61 @@
             </div>
         </RadzenTabsItem>
         <RadzenTabsItem Text="Automation">
-            <div style="padding: 16px;">
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                    <RadzenSwitch @bind-Value="@_globalEasyApply" />
-                    <span>Easy Apply only</span>
+            <div style="max-width: 500px;">
+
+                @* Easy Apply Only Toggle *@
+                <div class="settings-card">
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
+                        <RadzenSwitch @bind-Value="@_globalEasyApply" />
+                        <span style="font-weight:600;">Easy Apply only</span>
+                    </div>
+                    <RadzenText TextStyle="TextStyle.Caption" style="color:var(--rz-text-tertiary);">
+                        When enabled, only jobs with Easy Apply will be processed
+                    </RadzenText>
                 </div>
-                <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@SaveSettings"><RadzenIcon Icon="save" /> Save Settings</RadzenButton>
+
+                @* Search limits *@
+                <div class="settings-card">
+                    <div style="font-weight:600; margin-bottom:8px;">🔍 Search</div>
+                    <div class="limit-row">
+                        <RadzenText TextStyle="TextStyle.Body2" style="flex:1;">Max jobs to search:</RadzenText>
+                        <RadzenNumeric @bind-Value="@_maxSearchJobs" Min="0" Max="500" Step="5" style="width:100px;" Disabled="@_unlimitedSearch" />
+                        <label style="display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; font-size:13px;">
+                            <RadzenCheckBox @bind-Value="@_unlimitedSearch" />
+                            <span>∞ No limit</span>
+                        </label>
+                    </div>
+                </div>
+
+                @* Apply limits *@
+                <div class="settings-card">
+                    <div style="font-weight:600; margin-bottom:8px;">📤 Apply</div>
+                    <div class="limit-row">
+                        <RadzenText TextStyle="TextStyle.Body2" style="flex:1;">Max jobs to apply:</RadzenText>
+                        <RadzenNumeric @bind-Value="@_maxApplyJobs" Min="0" Max="500" Step="5" style="width:100px;" Disabled="@_unlimitedApply" />
+                        <label style="display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; font-size:13px;">
+                            <RadzenCheckBox @bind-Value="@_unlimitedApply" />
+                            <span>∞ No limit</span>
+                        </label>
+                    </div>
+                </div>
+
+                @* Full Auto limits *@
+                <div class="settings-card">
+                    <div style="font-weight:600; margin-bottom:8px;">⚡ Full Auto</div>
+                    <div class="limit-row">
+                        <RadzenText TextStyle="TextStyle.Body2" style="flex:1;">Max jobs (Full):</RadzenText>
+                        <RadzenNumeric @bind-Value="@_maxFullJobs" Min="0" Max="500" Step="5" style="width:100px;" Disabled="@_unlimitedFull" />
+                        <label style="display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; font-size:13px;">
+                            <RadzenCheckBox @bind-Value="@_unlimitedFull" />
+                            <span>∞ No limit</span>
+                        </label>
+                    </div>
+                </div>
+
+                <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@SaveSettings" style="margin-top:16px;">
+                    💾 Save Settings
+                </RadzenButton>
             </div>
         </RadzenTabsItem>
         <RadzenTabsItem Text="Logs">

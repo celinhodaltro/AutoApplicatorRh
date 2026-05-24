@@ -68,7 +68,6 @@ public sealed class GetDashboardDataQueryHandler(
         var pipelineStages = new (JobStatus Status, string Name, string Color)[]
         {
             (JobStatus.New, "New", "#2196F3"),
-            (JobStatus.Reviewed, "Reviewed", "#FF9800"),
             (JobStatus.Approved, "Approved", "#4CAF50"),
             (JobStatus.Pending, "Pending", "#9C27B0"),
             (JobStatus.Applied, "Applied", "#2E7D32"),
@@ -83,7 +82,7 @@ public sealed class GetDashboardDataQueryHandler(
             TotalProfiles: profiles.Count,
             ActiveProfiles: profiles.Count(p => p.Enabled),
             TotalJobs: jobs.Count,
-            PendingReview: jobs.Count(j => j.Status is JobStatus.New or JobStatus.Reviewed or JobStatus.Pending),
+            PendingReview: jobs.Count(j => j.Status is JobStatus.New or JobStatus.Pending),
             AppliedJobs: jobs.Count(j => j.Status == JobStatus.Applied),
             ApprovedJobs: jobs.Count(j => j.Status == JobStatus.Approved),
             TotalQuestions: totalQuestions,
