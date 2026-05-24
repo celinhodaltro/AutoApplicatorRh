@@ -11,6 +11,7 @@ public sealed class GupyAdapter : IPlatformAdapter
     public PlatformType Platform => PlatformType.Gupy;
     public string BaseUrl => "https://portal.gupy.io";
 
+    private readonly GupyExtractor _extractor;
     private readonly HumanBehavior _behavior;
     private readonly ILogger<GupyAdapter> _logger;
 
@@ -45,8 +46,9 @@ public sealed class GupyAdapter : IPlatformAdapter
         "[class*=\"place\"]"
     ];
 
-    public GupyAdapter(ILogger<GupyAdapter> logger)
+    public GupyAdapter(ILogger<GupyAdapter> logger, GupyExtractor extractor)
     {
+        _extractor = extractor;
         _behavior = new HumanBehavior();
         _logger = logger;
     }
@@ -66,55 +68,7 @@ public sealed class GupyAdapter : IPlatformAdapter
 
     public async Task<List<ExtractedJob>> ExtractListingsAsync(IPage page)
     {
-        var cards = new List<ExtractedJob>();
-
-        try
-        {
-            await _behavior.DelayAsync(2000, 3000);
-
-            var jobLinks = await page.QuerySelectorAllAsync("a[href*=\"/job/\"]");
-            var processedUrls = new HashSet<string>();
-
-            foreach (var link in jobLinks)
-            {
-                try
-                {
-                    var href = await link.GetAttributeAsync("href");
-                    if (string.IsNullOrEmpty(href)) continue;
-
-                    var url = href.StartsWith("http") ? href : $"{BaseUrl}{href}";
-                    if (!processedUrls.Add(url)) continue;
-
-                    var title = (await GetInnerTextAsync(link, CardTitleSelectors))
-                                ?? link.InnerTextAsync().Result?.Trim()
-                                ?? string.Empty;
-                    if (string.IsNullOrEmpty(title)) continue;
-
-                    var company = await GetInnerTextAsync(link, CardCompanySelectors) ?? string.Empty;
-                    var location = await GetInnerTextAsync(link, CardLocationSelectors) ?? string.Empty;
-
-                    var externalId = Guid.NewGuid().ToString("N")[..12];
-
-                    cards.Add(new ExtractedJob
-                    {
-                        ExternalId = externalId,
-                        Title = title,
-                        Company = company,
-                        Location = location,
-                        Url = url,
-                        EasyApply = false
-                    });
-                }
-                catch { /* try next selector */ }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to extract Gupy job listings");
-        }
-
-        _logger.LogInformation("Extracted {Count} Gupy job listings", cards.Count);
-        return cards;
+        return await _extractor.ExtractJobCardsAsync(page);
     }
 
     public Task<bool> HasNextPageAsync(IPage page)
@@ -127,10 +81,11 @@ public sealed class GupyAdapter : IPlatformAdapter
         return Task.CompletedTask;
     }
 
-    public Task NavigateToPageAsync(IPage page, SearchProfile profile, int pageNum)
+    public async Task NavigateToPageAsync(IPage page, SearchProfile profile, int pageNum)
     {
-        // Gupy não tem paginação
-        return Task.CompletedTask;
+        var url = $"{BaseUrl}/job-search?term={Uri.EscapeDataString(string.Join(" ", profile.Keywords))}&page={pageNum}";
+        await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await Task.Delay(2000);
     }
 
     public async Task<JobDetail> ExtractJobDetailsAsync(IPage page, string url)
@@ -141,23 +96,7 @@ public sealed class GupyAdapter : IPlatformAdapter
             await _behavior.DelayAsync(1000, 2000);
         }
 
-        try
-        {
-            var description = await page.EvaluateAsync<string>(@"
-                const desc = document.querySelector('[data-testid=""job-description""], .job-description, [class*=""description""]');
-                return desc ? desc.innerText.trim() : '';
-            ");
-
-            return new JobDetail
-            {
-                Description = description ?? string.Empty
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to extract Gupy job details");
-            return new JobDetail { Description = string.Empty };
-        }
+        return await _extractor.ExtractJobDetailsAsync(page);
     }
 
     private static async Task<string?> GetInnerTextAsync(IElementHandle parent, string[] selectors)

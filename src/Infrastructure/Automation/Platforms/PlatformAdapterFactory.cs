@@ -24,7 +24,7 @@ public sealed class PlatformAdapterFactory
         {
             PlatformType.LinkedIn => _serviceProvider.GetRequiredService<LinkedInAdapter>(),
             PlatformType.Indeed => new IndeedAdapter(_loggerFactory.CreateLogger<IndeedAdapter>()),
-            PlatformType.Gupy => new GupyAdapter(_loggerFactory.CreateLogger<GupyAdapter>()),
+            PlatformType.Gupy => _serviceProvider.GetRequiredService<GupyAdapter>(),
             _ => throw new ArgumentOutOfRangeException(nameof(platform), platform, $"No adapter for platform {platform}")
         };
     }

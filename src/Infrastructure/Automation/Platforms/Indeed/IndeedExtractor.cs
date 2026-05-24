@@ -159,8 +159,8 @@ public sealed class IndeedExtractor
                 if (!string.IsNullOrEmpty(href))
                 {
                     return href.StartsWith("http") ? href
-                        : href.StartsWith("/") ? $"{_baseUrl(href)}{href}"
-                        : $"{_baseUrl(href)}/{href}";
+                        : href.StartsWith("/") ? $"{GetBaseUrl(href)}{href}"
+                        : $"{GetBaseUrl(href)}/{href}";
                 }
             }
         }
@@ -321,10 +321,13 @@ public sealed class IndeedExtractor
         return null;
     }
 
-    private static string _baseUrl(string href)
+    private static string GetBaseUrl(string href)
     {
         if (href.StartsWith("/br")) return "https://br.indeed.com";
         if (href.StartsWith("/uk")) return "https://uk.indeed.com";
+        if (href.StartsWith("/ar")) return "https://ar.indeed.com";
+        if (href.StartsWith("/mx")) return "https://mx.indeed.com";
+        if (href.StartsWith("/pt")) return "https://pt.indeed.com";
         return "https://www.indeed.com";
     }
 }

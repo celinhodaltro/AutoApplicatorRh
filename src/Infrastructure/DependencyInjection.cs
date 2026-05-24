@@ -3,6 +3,7 @@ using AutoApplicator.Domain.Interfaces;
 using AutoApplicator.Infrastructure.Automation;
 using AutoApplicator.Infrastructure.Automation.Abstractions;
 using AutoApplicator.Infrastructure.Automation.Platforms;
+using AutoApplicator.Infrastructure.Automation.Platforms.Gupy;
 using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn;
 using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn.DescriptionExtractors;
 using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn.FieldFillers;
@@ -40,6 +41,12 @@ public static class DependencyInjection
 
         // LinkedInExtractor
         services.AddScoped<LinkedInExtractor>();
+
+        // GupyExtractor
+        services.AddScoped<GupyExtractor>();
+
+        // GupyAdapter
+        services.AddScoped<GupyAdapter>();
 
         // LinkedInAdapter
         services.AddScoped<LinkedInAdapter>();
