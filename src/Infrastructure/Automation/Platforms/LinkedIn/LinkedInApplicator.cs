@@ -1,7 +1,8 @@
+using AutoApplicator.Application.Commands.Questions;
+using AutoApplicator.Application.Queries.Questions;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
-using AutoApplicator.Domain.Interfaces;
-using Microsoft.Extensions.DependencyInjection;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 
@@ -11,7 +12,7 @@ public sealed class LinkedInApplicator
 {
     private readonly ILogger<LinkedInApplicator> _logger;
     private readonly HumanBehavior _behavior;
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IMediator _mediator;
     private readonly Dictionary<string, string> _answersUsed = [];
 
     private static readonly string[] EasyApplyButton =
@@ -86,11 +87,11 @@ public sealed class LinkedInApplicator
         "button[data-control-name=\"discard_application_confirm_btn\"]"
     ];
 
-    public LinkedInApplicator(ILogger<LinkedInApplicator> logger, IServiceScopeFactory scopeFactory)
+    public LinkedInApplicator(ILogger<LinkedInApplicator> logger, IMediator mediator)
     {
         _logger = logger;
         _behavior = new HumanBehavior();
-        _scopeFactory = scopeFactory;
+        _mediator = mediator;
     }
 
     public async Task<ApplyResult> ApplyAsync(IPage page, JobListing job)
@@ -113,89 +114,22 @@ public sealed class LinkedInApplicator
             var maxSteps = 10;
             for (var step = 0; step < maxSteps; step++)
             {
-                _logger.LogInformation("[{Title}] === Step {Step} ===", job.Title, step + 1);
-
-                var (fields, stepTitle) = await ExtractFormFieldsAsync(page);
-                if (fields.Count > 0)
-                {
-                    _logger.LogInformation("[{Title}] Step {Step}: {FieldCount} field(s): {Fields}",
-                        job.Title, step + 1, fields.Count,
-                        string.Join(", ", fields.Select(f => $"{f.Label} ({f.Type})")));
-                }
-
-                var hasUnansweredRequired = false;
-                foreach (var field in fields)
-                {
-                    var filled = await FillFieldAsync(page, field, job, stepTitle);
-                    if (!filled)
-                    {
-                        _logger.LogWarning("[{Title}] ❌ Unanswered required field: \"{Field}\"", job.Title, field.Label);
-                        if (field.Required) hasUnansweredRequired = true;
-                    }
-                    else
-                    {
-                        _logger.LogInformation("[{Title}] ✅ Filled: \"{Field}\"", job.Title, field.Label);
-                    }
-                }
+                var (fields, hasUnansweredRequired) = await ProcessFormStepAsync(page, job, step);
 
                 if (hasUnansweredRequired)
-                {
-                    _logger.LogInformation("[{Title}] ⏭️ Skipping — configure answers in Questions tab", job.Title);
-                    await CloseModalAsync(page);
-                    return new ApplyResult(false, "Pending questions need configuration", true);
-                }
+                    return await HandleUnansweredRequiredAsync(page, job);
 
-                // File upload
-                var fileFields = fields.Where(f => f.Type == FormFieldType.File).ToList();
-                if (fileFields.Count > 0)
-                {
-                    var resumePath = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "AutoApplicator", "resume.pdf");
-                    if (File.Exists(resumePath))
-                        await UploadResumeAsync(page, resumePath);
-                }
+                await HandleFileUploadAsync(page, fields);
 
                 await _behavior.DelayAsync(500, 1000);
 
-                // Check if submit step (no fields + submit button)
-                if (fields.Count == 0 && await IsSubmitStepAsync(page))
-                {
-                    _logger.LogInformation("[{Title}] Submit button found! Submitting...", job.Title);
-                    await ClickSubmitAsync(page);
-                    await _behavior.DelayAsync(3000, 4000);
+                var submitResult = await HandleSubmitStepAsync(page, job, fields);
+                if (submitResult is not null)
+                    return submitResult;
 
-                    if (await CheckSubmissionSuccessAsync(page))
-                    {
-                        _logger.LogInformation("[{Title}] ✅ APPLICATION SUBMITTED SUCCESSFULLY!", job.Title);
-                        return new ApplyResult(true, "Application submitted", false, _answersUsed);
-                    }
-                    _logger.LogWarning("[{Title}] ❌ Submit failed — no confirmation", job.Title);
-                    return new ApplyResult(false, "No confirmation detected");
-                }
-
-                // Advance to next step
-                var result = await AdvanceStepAsync(page);
-                switch (result)
-                {
-                    case StepResult.Submit:
-                        _logger.LogInformation("[{Title}] 📤 On submit step", job.Title);
-                        await ClickSubmitAsync(page);
-                        await _behavior.DelayAsync(3000, 4000);
-                        if (await CheckSubmissionSuccessAsync(page))
-                        {
-                            _logger.LogInformation("[{Title}] ✅ APPLICATION SUBMITTED SUCCESSFULLY!", job.Title);
-                            return new ApplyResult(true, "Application submitted", false, _answersUsed);
-                        }
-                        return new ApplyResult(false, "No confirmation detected");
-                    case StepResult.Error:
-                        _logger.LogWarning("[{Title}] ❌ Error advancing step", job.Title);
-                        return new ApplyResult(false, "Error advancing step");
-                    case StepResult.Next:
-                    case StepResult.Review:
-                        _logger.LogInformation("[{Title}] ➡️ Advanced to next step", job.Title);
-                        break;
-                }
+                var advanceResult = await HandleAdvanceStepAsync(page, job);
+                if (advanceResult is not null)
+                    return advanceResult;
 
                 await _behavior.DelayAsync(1000, 2000);
             }
@@ -209,6 +143,102 @@ public sealed class LinkedInApplicator
             await CloseModalAsync(page).ConfigureAwait(false);
             return new ApplyResult(false, ex.Message);
         }
+    }
+
+    private async Task<(List<FormField> Fields, bool HasUnansweredRequired)> ProcessFormStepAsync(
+        IPage page, JobListing job, int step)
+    {
+        _logger.LogInformation("[{Title}] === Step {Step} ===", job.Title, step + 1);
+
+        var (fields, stepTitle) = await ExtractFormFieldsAsync(page);
+        if (fields.Count > 0)
+        {
+            _logger.LogInformation("[{Title}] Step {Step}: {FieldCount} field(s): {Fields}",
+                job.Title, step + 1, fields.Count,
+                string.Join(", ", fields.Select(f => $"{f.Label} ({f.Type})")));
+        }
+
+        var hasUnansweredRequired = false;
+        foreach (var field in fields)
+        {
+            var filled = await FillFieldAsync(page, field, job, stepTitle);
+            if (!filled)
+            {
+                _logger.LogWarning("[{Title}] ❌ Unanswered required field: \"{Field}\"", job.Title, field.Label);
+                if (field.Required) hasUnansweredRequired = true;
+            }
+            else
+            {
+                _logger.LogInformation("[{Title}] ✅ Filled: \"{Field}\"", job.Title, field.Label);
+            }
+        }
+
+        return (fields, hasUnansweredRequired);
+    }
+
+    private async Task<ApplyResult> HandleUnansweredRequiredAsync(IPage page, JobListing job)
+    {
+        _logger.LogInformation("[{Title}] ⏭️ Skipping — configure answers in Questions tab", job.Title);
+        await CloseModalAsync(page);
+        return new ApplyResult(false, "Pending questions need configuration", true);
+    }
+
+    private async Task HandleFileUploadAsync(IPage page, List<FormField> fields)
+    {
+        var fileFields = fields.Where(f => f.Type == FormFieldType.File).ToList();
+        if (fileFields.Count > 0)
+        {
+            var resumePath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AutoApplicator", "resume.pdf");
+            if (File.Exists(resumePath))
+                await UploadResumeAsync(page, resumePath);
+        }
+    }
+
+    private async Task<ApplyResult?> HandleSubmitStepAsync(IPage page, JobListing job, List<FormField> fields)
+    {
+        if (fields.Count != 0 || !await IsSubmitStepAsync(page))
+            return null;
+
+        _logger.LogInformation("[{Title}] Submit button found! Submitting...", job.Title);
+        await ClickSubmitAsync(page);
+        await _behavior.DelayAsync(3000, 4000);
+
+        if (await CheckSubmissionSuccessAsync(page))
+        {
+            _logger.LogInformation("[{Title}] ✅ APPLICATION SUBMITTED SUCCESSFULLY!", job.Title);
+            return new ApplyResult(true, "Application submitted", false, _answersUsed);
+        }
+
+        _logger.LogWarning("[{Title}] ❌ Submit failed — no confirmation", job.Title);
+        return new ApplyResult(false, "No confirmation detected");
+    }
+
+    private async Task<ApplyResult?> HandleAdvanceStepAsync(IPage page, JobListing job)
+    {
+        var result = await AdvanceStepAsync(page);
+        switch (result)
+        {
+            case StepResult.Submit:
+                _logger.LogInformation("[{Title}] 📤 On submit step", job.Title);
+                await ClickSubmitAsync(page);
+                await _behavior.DelayAsync(3000, 4000);
+                if (await CheckSubmissionSuccessAsync(page))
+                {
+                    _logger.LogInformation("[{Title}] ✅ APPLICATION SUBMITTED SUCCESSFULLY!", job.Title);
+                    return new ApplyResult(true, "Application submitted", false, _answersUsed);
+                }
+                return new ApplyResult(false, "No confirmation detected");
+            case StepResult.Error:
+                _logger.LogWarning("[{Title}] ❌ Error advancing step", job.Title);
+                return new ApplyResult(false, "Error advancing step");
+            case StepResult.Next:
+            case StepResult.Review:
+                _logger.LogInformation("[{Title}] ➡️ Advanced to next step", job.Title);
+                break;
+        }
+        return null;
     }
 
     private async Task<bool> OpenEasyApplyModalAsync(IPage page)
@@ -235,14 +265,25 @@ public sealed class LinkedInApplicator
         var modalExists = await formRoot.IsVisibleAsync();
         if (!modalExists) return ([], "");
 
-        // Extract step title from modal header
-        var stepTitle = "";
+        var stepTitle = await ExtractStepTitleAsync(page);
+
+        await ExtractTextInputsAsync(page, formRoot, fields);
+        await ExtractSelectsAsync(page, formRoot, fields);
+        await ExtractTextareasAsync(page, formRoot, fields);
+        await ExtractFileUploadAsync(page, fields);
+
+        return (fields, stepTitle);
+    }
+
+    private async Task<string> ExtractStepTitleAsync(IPage page)
+    {
         string[] stepSelectors =
         [
             ".jobs-easy-apply-modal__content h3.t-16",
             ".ph5 h3.t-16.t-bold",
             ".artdeco-modal__content h3"
         ];
+
         foreach (var sel in stepSelectors)
         {
             try
@@ -250,15 +291,19 @@ public sealed class LinkedInApplicator
                 var title = await page.Locator(sel).First.InnerTextAsync(new() { Timeout = 500 });
                 if (!string.IsNullOrWhiteSpace(title))
                 {
-                    stepTitle = title.Trim();
+                    var stepTitle = title.Trim();
                     _logger.LogDebug("Step title extracted via '{Selector}': \"{Title}\"", sel, stepTitle);
-                    break;
+                    return stepTitle;
                 }
             }
-            catch { }
+            catch { /* try next selector */ }
         }
 
-        // Text inputs
+        return "";
+    }
+
+    private async Task ExtractTextInputsAsync(IPage page, ILocator formRoot, List<FormField> fields)
+    {
         var textInputs = formRoot.Locator("input[type=\"text\"], input:not([type]), input.artdeco-text-input--input, [data-test-single-line-text-form-component] input");
         var textCount = await textInputs.CountAsync();
         for (var i = 0; i < textCount; i++)
@@ -271,8 +316,10 @@ public sealed class LinkedInApplicator
             var id = await input.GetAttributeAsync("id") ?? "";
             fields.Add(new FormField(FormFieldType.Text, label, id, required, value));
         }
+    }
 
-        // Select dropdowns
+    private async Task ExtractSelectsAsync(IPage page, ILocator formRoot, List<FormField> fields)
+    {
         var selects = formRoot.Locator("select, [data-test-text-entity-list-form-component] select");
         var selectCount = await selects.CountAsync();
         for (var i = 0; i < selectCount; i++)
@@ -297,8 +344,10 @@ public sealed class LinkedInApplicator
             }");
             fields.Add(new FormField(FormFieldType.Select, label, id, required, value, [.. options]));
         }
+    }
 
-        // Textareas
+    private async Task ExtractTextareasAsync(IPage page, ILocator formRoot, List<FormField> fields)
+    {
         var textareas = formRoot.Locator("textarea");
         var taCount = await textareas.CountAsync();
         for (var i = 0; i < taCount; i++)
@@ -311,14 +360,14 @@ public sealed class LinkedInApplicator
             var id = await ta.GetAttributeAsync("id") ?? "";
             fields.Add(new FormField(FormFieldType.Textarea, label, id, required, value));
         }
+    }
 
-        // File input detection
+    private static async Task ExtractFileUploadAsync(IPage page, List<FormField> fields)
+    {
         var fileBtn = page.Locator("input[type=\"file\"], .jobs-document-upload__upload-button").First;
         var hasFile = await fileBtn.IsVisibleAsync();
         if (hasFile)
             fields.Add(new FormField(FormFieldType.File, "Resume", "", true));
-
-        return (fields, stepTitle);
     }
 
     private async Task<string> ExtractLabelAsync(IPage page, ILocator element, string type)
@@ -364,7 +413,7 @@ public sealed class LinkedInApplicator
             }");
             if (!string.IsNullOrEmpty(labelText)) return labelText;
         }
-        catch { }
+        catch { /* try next fallback */ }
 
         // Fallback: aria-label
         try
@@ -372,7 +421,7 @@ public sealed class LinkedInApplicator
             var ariaLabel = await element.GetAttributeAsync("aria-label");
             if (!string.IsNullOrEmpty(ariaLabel)) return ariaLabel;
         }
-        catch { }
+        catch { /* try next fallback */ }
 
         // Fallback: placeholder
         try
@@ -380,7 +429,7 @@ public sealed class LinkedInApplicator
             var placeholder = await element.GetAttributeAsync("placeholder");
             if (!string.IsNullOrEmpty(placeholder)) return placeholder;
         }
-        catch { }
+        catch { /* try next fallback */ }
 
         return "";
     }
@@ -391,14 +440,36 @@ public sealed class LinkedInApplicator
 
         if (field.Type == FormFieldType.File) return true;
 
-        using var scope = _scopeFactory.CreateScope();
-        var questionRepo = scope.ServiceProvider.GetRequiredService<IQuestionRepository>();
+        var questionFieldType = MapFieldType(field.Type);
 
-        var existing = await questionRepo.FindByTextAsync(field.Label);
-        var isExisting = existing is not null;
+        // Envia comando para upsert via MediatR (persistência desacoplada)
+        await _mediator.Send(new UpsertQuestionCommand(
+            QuestionText: field.Label,
+            FieldType: questionFieldType,
+            Options: field.Options,
+            Platform: PlatformType.LinkedIn,
+            JobTitle: job.Title,
+            Company: job.Company,
+            Group: stepTitle));
 
-        // Map field type
-        var questionFieldType = field.Type switch
+        // Busca a pergunta (incluindo Answer) via query
+        var existing = await _mediator.Send(new FindQuestionByTextQuery(field.Label));
+
+        if (existing is not null && !string.IsNullOrEmpty(existing.Answer))
+            return await FillWithSavedAnswerAsync(page, field, existing);
+
+        if (existing is not null)
+        {
+            _logger.LogInformation("[Questions] Sem resposta configurada, pulando: \"{Label}\"", field.Label);
+            return false;
+        }
+
+        return HandlePrefilledField(field);
+    }
+
+    private static QuestionFieldType MapFieldType(FormFieldType fieldType)
+    {
+        return fieldType switch
         {
             FormFieldType.Text => QuestionFieldType.Textarea,
             FormFieldType.Textarea => QuestionFieldType.Textarea,
@@ -407,56 +478,21 @@ public sealed class LinkedInApplicator
             FormFieldType.Checkbox => QuestionFieldType.Checkbox,
             _ => QuestionFieldType.Textarea
         };
+    }
 
-        // ALWAYS upsert the question (save/update) with latest options, before any fill logic
-        if (isExisting && existing is not null)
-        {
-            existing.Options = field.Options ?? [];
-            existing.FieldType = questionFieldType;
-            existing.Group = stepTitle;
-            existing.JobTitle = job.Title;
-            existing.Company = job.Company;
-            existing.UpdatedAt = DateTime.UtcNow;
-            await questionRepo.UpdateAsync(existing, default);
-        }
-        else
-        {
-            var newQuestion = new CollectedQuestion
-            {
-                Id = Guid.NewGuid(),
-                QuestionText = field.Label,
-                FieldType = questionFieldType,
-                Options = field.Options ?? [],
-                Group = stepTitle,
-                Platform = PlatformType.LinkedIn,
-                JobTitle = job.Title,
-                Company = job.Company,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            await questionRepo.AddAsync(newQuestion, default);
-        }
+    private async Task<bool> FillWithSavedAnswerAsync(IPage page, FormField field, CollectedQuestion existing)
+    {
+        _logger.LogInformation("[Questions] Usando resposta salva: \"{Label}\" = \"{Answer}\"", field.Label, existing.Answer);
+        _answersUsed[field.Label] = existing.Answer;
+        await FillFieldValueAsync(page, field, existing.Answer);
+        return true;
+    }
 
-        // If existing question has a saved answer, use it
-        if (isExisting && existing is not null && !string.IsNullOrEmpty(existing.Answer))
-        {
-            _logger.LogInformation("[Questions] Usando resposta salva: \"{Label}\" = \"{Answer}\"", field.Label, existing.Answer);
-            _answersUsed[field.Label] = existing.Answer;
-            await FillFieldValueAsync(page, field, existing.Answer);
-            return true;
-        }
-
-        // If existing question but no answer configured
-        if (isExisting)
-        {
-            _logger.LogInformation("[Questions] Sem resposta configurada, pulando: \"{Label}\"", field.Label);
-            return false;
-        }
-
+    private static bool HandlePrefilledField(FormField field)
+    {
         // New question: if field is already pre-filled by LinkedIn (and not a select), skip it
         if (!string.IsNullOrEmpty(field.CurrentValue) && field.Type != FormFieldType.Select)
         {
-            _logger.LogInformation("[Questions] Campo já preenchido pelo LinkedIn: \"{Label}\"", field.Label);
             return true;
         }
 
@@ -603,13 +639,11 @@ public sealed class LinkedInApplicator
         }
 
         try { await _behavior.HumanClickAsync(page, submitSel); }
-        catch
-        {
+        catch { /* try next click method */
             try { await page.Locator(submitSel).ClickAsync(new() { Force = true }); }
-            catch
-            {
+            catch { /* try next click method */
                 try { await page.EvaluateAsync(@"(sel) => document.querySelector(sel)?.click()", submitSel); }
-                catch { }
+                catch { /* try next click method */ }
             }
         }
     }
@@ -625,7 +659,16 @@ public sealed class LinkedInApplicator
 
         await _behavior.DelayAsync(2000, 3000);
 
-        // Check modal containers for success text
+        if (await CheckSuccessInContainersAsync(page, successPhrases)) return true;
+        if (await CheckSuccessInBodyAsync(page, successPhrases)) return true;
+        if (await CheckSuccessByModalDismissedAsync(page)) return true;
+        if (await CheckSuccessPostApplyModalAsync(page)) return true;
+
+        return false;
+    }
+
+    private async Task<bool> CheckSuccessInContainersAsync(IPage page, string[] successPhrases)
+    {
         var containers = new[] { ".jobs-easy-apply-modal", ".artdeco-modal", ".jpac-modal" };
         foreach (var container in containers)
         {
@@ -639,10 +682,13 @@ public sealed class LinkedInApplicator
                     return true;
                 }
             }
-            catch { }
+            catch { /* try next container */ }
         }
+        return false;
+    }
 
-        // Check body text
+    private async Task<bool> CheckSuccessInBodyAsync(IPage page, string[] successPhrases)
+    {
         try
         {
             var bodyText = await page.Locator("body").InnerTextAsync(new() { Timeout = 1000 });
@@ -652,9 +698,12 @@ public sealed class LinkedInApplicator
                 return true;
             }
         }
-        catch { }
+        catch { /* try next approach */ }
+        return false;
+    }
 
-        // Check if modal is gone (job page visible again)
+    private async Task<bool> CheckSuccessByModalDismissedAsync(IPage page)
+    {
         try
         {
             var modalOpen = await WaitForAnySelectorAsync(page, ModalContainer, 2000);
@@ -664,8 +713,34 @@ public sealed class LinkedInApplicator
                 return true;
             }
         }
-        catch { }
+        catch { /* try next approach */ }
+        return false;
+    }
 
+    private async Task<bool> CheckSuccessPostApplyModalAsync(IPage page)
+    {
+        try
+        {
+            var postApplyModal = page.Locator("div[aria-labelledby=\"post-apply-modal\"], .jpac-modal-header").First;
+            await postApplyModal.WaitForAsync(new() { Timeout = 3000 });
+            var isVisible = await postApplyModal.IsVisibleAsync();
+            if (isVisible)
+            {
+                _logger.LogInformation("[Success] Post-apply confirmation modal detected");
+
+                // Click "Concluído" / "Done" button to close
+                try
+                {
+                    var doneBtn = page.Locator("#post-apply-modal + .artdeco-modal__actionbar button.artdeco-button--primary, .artdeco-modal__actionbar button.artdeco-button--primary").First;
+                    await doneBtn.ClickAsync(new() { Timeout = 2000 });
+                    await _behavior.DelayAsync(500, 1000);
+                }
+                catch { /* try next button */ }
+
+                return true;
+            }
+        }
+        catch { /* try next approach */ }
         return false;
     }
 
@@ -704,7 +779,7 @@ public sealed class LinkedInApplicator
                 if (await el.IsVisibleAsync())
                     return await el.InnerTextAsync();
             }
-            catch { }
+            catch { /* try next selector */ }
         }
         return null;
     }
@@ -724,7 +799,7 @@ public sealed class LinkedInApplicator
                     await _behavior.HumanClickAsync(page, discardSel);
             }
         }
-        catch { }
+        catch { /* close modal, ignore error */ }
     }
 
     private async Task<string?> WaitForAnySelectorAsync(IPage page, string[] selectors, int timeoutMs)
@@ -738,7 +813,7 @@ public sealed class LinkedInApplicator
                 if (await locator.IsVisibleAsync())
                     return sel;
             }
-            catch { }
+            catch { /* try next selector */ }
         }
         return null;
     }

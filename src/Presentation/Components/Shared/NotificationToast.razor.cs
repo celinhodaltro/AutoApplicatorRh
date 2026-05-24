@@ -1,11 +1,11 @@
-﻿using AutoApplicator.Infrastructure.Services;
+﻿using AutoApplicator.Application.Interfaces;
 using Microsoft.AspNetCore.Components;
 
 namespace AutoApplicator.App.Components.Shared;
 
 public partial class NotificationToast : IDisposable
 {
-    [Inject] private NotificationService NotificationService { get; set; } = default!;
+    [Inject] private INotificationService NotificationService { get; set; } = default!;
 
     private readonly List<ToastItem> _toasts = [];
     private readonly HashSet<Guid> _shownIds = [];

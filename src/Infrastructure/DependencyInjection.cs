@@ -22,9 +22,11 @@ public static class DependencyInjection
         services.AddSingleton<PlaywrightService>();
         services.AddSingleton<IPlaywrightService>(sp => sp.GetRequiredService<PlaywrightService>());
         services.AddSingleton<AutomationService>();
+        services.AddSingleton<INotificationService>(sp => sp.GetRequiredService<NotificationService>());
         services.AddSingleton<NotificationService>();
+        services.AddSingleton<IAutomationStateService>(sp => sp.GetRequiredService<AutomationService>());
         services.AddSingleton<PlatformAdapterFactory>();
-        services.AddSingleton<LinkedInApplicator>();
+        services.AddScoped<LinkedInApplicator>();
         services.AddSingleton<ExceptionHandlerService>();
 
         return services;

@@ -1,13 +1,13 @@
 @page "/jobs/{Id:guid}"
 @using Radzen
 @using Radzen.Blazor
+@using AutoApplicator.Application.Commands.Jobs
 @inject IMediator Mediator
-@inject IJobRepository JobRepo
 @inject NavigationManager Navigation
 
 @if (_job is null)
 {
-    <RadzenText>Loading...</RadzenText>
+    <LoadingState />
 }
 else
 {
@@ -22,7 +22,7 @@ else
         {
             <RadzenBadge BadgeStyle="BadgeStyle.Success">@_job.Salary</RadzenBadge>
         }
-        <RadzenBadge BadgeStyle="@GetStatusBadge(_job.Status)">@_job.Status</RadzenBadge>
+        <StatusBadge Status="_job.Status" />
         @if (_job.MatchScore.HasValue)
         {
             <RadzenBadge BadgeStyle="BadgeStyle.Info">Match: @_job.MatchScore%</RadzenBadge>
@@ -170,20 +170,7 @@ else
     private async Task Delete()
     {
         if (_job is null) return;
-        await JobRepo.DeleteAsync(_job.Id, default);
+        await Mediator.Send(new DeleteJobCommand(_job.Id));
         Navigation.NavigateTo("/jobs");
     }
-
-    private static BadgeStyle GetStatusBadge(JobStatus status) => status switch
-    {
-        JobStatus.New => BadgeStyle.Info,
-        JobStatus.Reviewed => BadgeStyle.Warning,
-        JobStatus.Approved => BadgeStyle.Success,
-        JobStatus.Rejected => BadgeStyle.Danger,
-        JobStatus.Applied => BadgeStyle.Primary,
-        JobStatus.Pending => BadgeStyle.Warning,
-        JobStatus.Skipped => BadgeStyle.Light,
-        JobStatus.Error => BadgeStyle.Danger,
-        _ => BadgeStyle.Light,
-    };
 }

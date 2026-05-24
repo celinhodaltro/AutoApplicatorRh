@@ -1,11 +1,11 @@
-﻿using AutoApplicator.Infrastructure.Services;
+﻿using AutoApplicator.Application.Interfaces;
 using Microsoft.AspNetCore.Components;
 
 namespace AutoApplicator.App.Components.Shared;
 
 public partial class NotificationBell : IDisposable
 {
-    [Inject] private NotificationService NotificationService { get; set; } = default!;
+    [Inject] private INotificationService NotificationService { get; set; } = default!;
 
     private bool _showPanel;
 

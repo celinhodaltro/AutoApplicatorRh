@@ -1,0 +1,8 @@
+@* EmptyState.razor *@
+<div style="text-align:center; padding:40px; color:var(--rz-text-secondary);">
+    <RadzenText TextStyle="TextStyle.Body1">@Message</RadzenText>
+</div>
+
+@code {
+    [Parameter] public string Message { get; set; } = "No data available.";
+}

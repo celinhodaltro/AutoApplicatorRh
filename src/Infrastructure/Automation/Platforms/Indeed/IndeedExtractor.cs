@@ -80,97 +80,17 @@ public sealed class IndeedExtractor
 
     public async Task<List<ExtractedJob>> ExtractJobCardsAsync(IPage page)
     {
+        var cardElements = await FindJobCardElementsAsync(page);
+        if (cardElements.Count == 0) return [];
+
         var cards = new List<ExtractedJob>();
-
-        IReadOnlyList<IElementHandle> cardElements = [];
-        foreach (var sel in JobCardSelectors)
-        {
-            cardElements = await page.QuerySelectorAllAsync(sel);
-            if (cardElements.Count > 0)
-            {
-                _logger.LogInformation("Found {Count} Indeed cards using: {Selector}", cardElements.Count, sel);
-                break;
-            }
-        }
-
-        if (cardElements.Count == 0)
-        {
-            _logger.LogWarning("No Indeed job cards found on page");
-            return cards;
-        }
-
         foreach (var el in cardElements)
         {
             try
             {
-                var jobKey = await el.GetAttributeAsync("data-jk")
-                          ?? await ExtractJobKeyFromLinkAsync(el);
-
-                if (string.IsNullOrEmpty(jobKey)) continue;
-
-                var title = await GetFirstVisibleTextAsync(el, CardTitleSelectors);
-                if (string.IsNullOrEmpty(title)) continue;
-
-                var company = await GetFirstVisibleTextAsync(el, CardCompanySelectors);
-                var location = await GetFirstVisibleTextAsync(el, CardLocationSelectors);
-
-                var url = string.Empty;
-                try
-                {
-                    var linkEl = await el.QuerySelectorAsync("a[data-jk], .jobTitle a, h2.jobTitle a");
-                    if (linkEl is not null)
-                    {
-                        var href = await linkEl.GetAttributeAsync("href");
-                        if (!string.IsNullOrEmpty(href))
-                        {
-                            url = href.StartsWith("http") ? href
-                                : href.StartsWith("/") ? $"{_baseUrl(href)}{href}"
-                                : $"{_baseUrl(href)}/{href}";
-                        }
-                    }
-                }
-                catch { /* ignore */ }
-
-                if (string.IsNullOrEmpty(url))
-                    url = $"https://br.indeed.com/viewjob?jk={jobKey}";
-
-                var cardText = ((await el.InnerTextAsync()) ?? string.Empty).ToLowerInvariant();
-                var easyApply = cardText.Contains("quick apply")
-                    || cardText.Contains("candidatar-se com o indeed")
-                    || cardText.Contains("candidatar-se")
-                    || cardText.Contains("candidatura rápida")
-                    || cardText.Contains("apply now")
-                    || cardText.Contains("candidatura simplificada")
-                    || cardText.Contains("apply with indeed");
-
-                if (!easyApply)
-                {
-                    foreach (var sel in QuickApplySelectors)
-                    {
-                        try
-                        {
-                            var badge = await el.QuerySelectorAsync(sel);
-                            if (badge is null) continue;
-                            var badgeText = ((await badge.InnerTextAsync()) ?? string.Empty).ToLowerInvariant();
-                            if (badgeText.Contains("quick") || badgeText.Contains("apply") || badgeText.Contains("rápida"))
-                            {
-                                easyApply = true;
-                                break;
-                            }
-                        }
-                        catch { /* try next */ }
-                    }
-                }
-
-                cards.Add(new ExtractedJob
-                {
-                    ExternalId = jobKey,
-                    Title = title,
-                    Company = company,
-                    Location = location,
-                    Url = url,
-                    EasyApply = easyApply
-                });
+                var card = await ExtractCardDataAsync(el);
+                if (card is not null)
+                    cards.Add(card);
             }
             catch (Exception ex)
             {
@@ -180,6 +100,101 @@ public sealed class IndeedExtractor
 
         _logger.LogInformation("Extracted {Count} Indeed cards from {Total} elements", cards.Count, cardElements.Count);
         return cards;
+    }
+
+    private async Task<IReadOnlyList<IElementHandle>> FindJobCardElementsAsync(IPage page)
+    {
+        foreach (var sel in JobCardSelectors)
+        {
+            var cardElements = await page.QuerySelectorAllAsync(sel);
+            if (cardElements.Count > 0)
+            {
+                _logger.LogInformation("Found {Count} Indeed cards using: {Selector}", cardElements.Count, sel);
+                return cardElements;
+            }
+        }
+
+        _logger.LogWarning("No Indeed job cards found on page");
+        return [];
+    }
+
+    private async Task<ExtractedJob?> ExtractCardDataAsync(IElementHandle el)
+    {
+        var jobKey = await el.GetAttributeAsync("data-jk")
+                  ?? await ExtractJobKeyFromLinkAsync(el);
+
+        if (string.IsNullOrEmpty(jobKey)) return null;
+
+        var title = await GetFirstVisibleTextAsync(el, CardTitleSelectors);
+        if (string.IsNullOrEmpty(title)) return null;
+
+        var company = await GetFirstVisibleTextAsync(el, CardCompanySelectors);
+        var location = await GetFirstVisibleTextAsync(el, CardLocationSelectors);
+
+        var url = await ExtractCardUrlAsync(el, jobKey);
+
+        var cardText = ((await el.InnerTextAsync()) ?? string.Empty).ToLowerInvariant();
+        var easyApply = await DetectEasyApplyAsync(el, cardText);
+
+        return new ExtractedJob
+        {
+            ExternalId = jobKey,
+            Title = title,
+            Company = company,
+            Location = location,
+            Url = url,
+            EasyApply = easyApply
+        };
+    }
+
+    private async Task<string> ExtractCardUrlAsync(IElementHandle el, string jobKey)
+    {
+        try
+        {
+            var linkEl = await el.QuerySelectorAsync("a[data-jk], .jobTitle a, h2.jobTitle a");
+            if (linkEl is not null)
+            {
+                var href = await linkEl.GetAttributeAsync("href");
+                if (!string.IsNullOrEmpty(href))
+                {
+                    return href.StartsWith("http") ? href
+                        : href.StartsWith("/") ? $"{_baseUrl(href)}{href}"
+                        : $"{_baseUrl(href)}/{href}";
+                }
+            }
+        }
+        catch { /* try next selector */ }
+
+        return $"https://br.indeed.com/viewjob?jk={jobKey}";
+    }
+
+    private async Task<bool> DetectEasyApplyAsync(IElementHandle el, string cardText)
+    {
+        if (cardText.Contains("quick apply")
+            || cardText.Contains("candidatar-se com o indeed")
+            || cardText.Contains("candidatar-se")
+            || cardText.Contains("candidatura rápida")
+            || cardText.Contains("apply now")
+            || cardText.Contains("candidatura simplificada")
+            || cardText.Contains("apply with indeed"))
+        {
+            return true;
+        }
+
+        foreach (var sel in QuickApplySelectors)
+        {
+            try
+            {
+                var badge = await el.QuerySelectorAsync(sel);
+                if (badge is null) continue;
+                var badgeText = ((await badge.InnerTextAsync()) ?? string.Empty).ToLowerInvariant();
+                if (badgeText.Contains("quick") || badgeText.Contains("apply") || badgeText.Contains("rápida"))
+                    return true;
+            }
+            catch { /* try next */ }
+        }
+
+        return false;
     }
 
     public async Task<JobDetail> ExtractJobDetailsAsync(IPage page)
@@ -220,7 +235,7 @@ public sealed class IndeedExtractor
             if (titleEl is not null)
                 title = ((await titleEl.InnerTextAsync()) ?? string.Empty).Trim();
         }
-        catch { /* ignore */ }
+        catch { /* try next selector */ }
 
         return new JobDetail
         {
@@ -301,7 +316,7 @@ public sealed class IndeedExtractor
                 if (vjMatch.Success) return vjMatch.Groups[1].Value;
             }
         }
-        catch { /* ignore */ }
+        catch { /* try next selector */ }
         return null;
     }
 

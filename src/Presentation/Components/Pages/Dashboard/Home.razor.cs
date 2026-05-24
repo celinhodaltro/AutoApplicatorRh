@@ -1,6 +1,7 @@
 ﻿using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
-using AutoApplicator.Domain.Interfaces;
+using AutoApplicator.Application.Queries.Dashboard;
+using MediatR;
 using Microsoft.AspNetCore.Components;
 using Radzen;
 
@@ -8,9 +9,7 @@ namespace AutoApplicator.App.Components.Pages.Dashboard;
 
 public partial class Home
 {
-    [Inject] private IProfileRepository ProfileRepo { get; set; } = default!;
-    [Inject] private IJobRepository JobRepo { get; set; } = default!;
-    [Inject] private IQuestionRepository QuestionRepo { get; set; } = default!;
+    [Inject] private IMediator Mediator { get; set; } = default!;
     [Inject] private NavigationManager Navigation { get; set; } = default!;
 
     private bool _loading = true;
@@ -38,65 +37,34 @@ public partial class Home
 
     private async Task LoadDashboardData()
     {
-        var profilesTask = ProfileRepo.GetAllAsync(default);
-        var jobsTask = JobRepo.GetAllAsync(default);
-        var questionsTask = QuestionRepo.GetAllAsync(default);
+        var data = await Mediator.Send(new GetDashboardDataQuery());
 
-        await Task.WhenAll(profilesTask, jobsTask, questionsTask);
+        _totalProfiles = data.TotalProfiles;
+        _activeProfiles = data.ActiveProfiles;
+        _totalJobs = data.TotalJobs;
+        _pendingReview = data.PendingReview;
+        _appliedJobs = data.AppliedJobs;
+        _approvedJobs = data.ApprovedJobs;
+        _totalQuestions = data.TotalQuestions;
+        _unansweredQuestions = data.UnansweredQuestions;
+        _recentJobs = data.RecentJobs;
 
-        var profiles = (await profilesTask).ToList();
-        var jobs = (await jobsTask).ToList();
-        var questions = (await questionsTask).ToList();
+        _jobsByStatus = data.JobsByStatus
+            .Select(x => new ChartDataItem { Category = x.Category, Value = x.Value })
+            .ToList();
 
-        _totalProfiles = profiles.Count;
-        _activeProfiles = profiles.Count(p => p.Enabled);
-        _totalJobs = jobs.Count;
-        _pendingReview = jobs.Count(j => j.Status is JobStatus.New or JobStatus.Reviewed or JobStatus.Pending);
-        _appliedJobs = jobs.Count(j => j.Status == JobStatus.Applied);
-        _approvedJobs = jobs.Count(j => j.Status == JobStatus.Approved);
-        _totalQuestions = questions.Count;
-        _unansweredQuestions = questions.Count(q => string.IsNullOrWhiteSpace(q.Answer));
+        _jobsByPlatform = data.JobsByPlatform
+            .Select(x => new ChartDataItem { Category = x.Category, Value = x.Value })
+            .ToList();
 
-        _jobsByStatus = Enum.GetValues<JobStatus>()
-            .Select(status => new ChartDataItem { Category = status.ToString(), Value = jobs.Count(j => j.Status == status) })
-            .Where(x => x.Value > 0).ToList();
+        _questionsStatus = data.QuestionsStatus
+            .Select(x => new ChartDataItem { Category = x.Category, Value = x.Value })
+            .ToList();
 
-        _jobsByPlatform = Enum.GetValues<PlatformType>()
-            .Select(platform => new ChartDataItem { Category = platform.ToString(), Value = jobs.Count(j => j.Platform == platform) })
-            .Where(x => x.Value > 0).ToList();
-
-        var answered = questions.Count(q => !string.IsNullOrWhiteSpace(q.Answer));
-        _questionsStatus = [new() { Category = "Answered", Value = answered }, new() { Category = "Unanswered", Value = questions.Count - answered }];
-
-        _recentJobs = jobs.OrderByDescending(j => j.CreatedAt).Take(5).ToList();
-
-        var pipelineOrder = new (JobStatus Status, string Name, string Color)[]
-        {
-            (JobStatus.New, "New", "#2196F3"),
-            (JobStatus.Reviewed, "Reviewed", "#FF9800"),
-            (JobStatus.Approved, "Approved", "#4CAF50"),
-            (JobStatus.Pending, "Pending", "#9C27B0"),
-            (JobStatus.Applied, "Applied", "#2E7D32"),
-            (JobStatus.Rejected, "Rejected", "#F44336"),
-        };
-
-        _pipelineItems = pipelineOrder
-            .Select(p => new PipelineItem { Name = p.Name, Count = jobs.Count(j => j.Status == p.Status), Color = p.Color })
+        _pipelineItems = data.PipelineItems
+            .Select(p => new PipelineItem { Name = p.Name, Count = p.Count, Color = p.Color })
             .ToList();
     }
-
-    private static BadgeStyle GetStatusBadge(JobStatus status) => status switch
-    {
-        JobStatus.New => BadgeStyle.Info,
-        JobStatus.Reviewed => BadgeStyle.Warning,
-        JobStatus.Approved => BadgeStyle.Success,
-        JobStatus.Rejected => BadgeStyle.Danger,
-        JobStatus.Applied => BadgeStyle.Primary,
-        JobStatus.Pending => BadgeStyle.Warning,
-        JobStatus.Skipped => BadgeStyle.Light,
-        JobStatus.Error => BadgeStyle.Danger,
-        _ => BadgeStyle.Light,
-    };
 
     private class ChartDataItem
     {

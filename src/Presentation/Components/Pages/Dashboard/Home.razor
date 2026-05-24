@@ -11,9 +11,7 @@
 
 @if (_loading)
 {
-    <div class="loading-container">
-        <div class="loading-spinner"></div>
-    </div>
+    <LoadingState />
 }
 else
 {
@@ -115,7 +113,7 @@ else
 
         @if (_recentJobs.Count == 0)
         {
-            <div class="empty-state">No jobs collected yet. Create a profile to start searching.</div>
+            <EmptyState Message="No jobs collected yet. Create a profile to start searching." />
         }
         else
         {
@@ -138,7 +136,7 @@ else
                                 <td><a href="/jobs/@job.Id" class="job-link">@job.Title</a></td>
                                 <td>@job.Company</td>
                                 <td><RadzenBadge BadgeStyle="BadgeStyle.Light">@job.Platform</RadzenBadge></td>
-                                <td><RadzenBadge BadgeStyle="@GetStatusBadge(job.Status)">@job.Status</RadzenBadge></td>
+                                <td><StatusBadge Status="job.Status" /></td>
                                 <td>
                                     @if (job.MatchScore.HasValue)
                                     {

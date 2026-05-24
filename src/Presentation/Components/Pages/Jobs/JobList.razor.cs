@@ -2,7 +2,6 @@ using AutoApplicator.Application.Commands.Jobs;
 using AutoApplicator.Application.Queries.Jobs;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
-using AutoApplicator.Domain.Interfaces;
 using MediatR;
 using Microsoft.AspNetCore.Components;
 using Radzen;
@@ -12,7 +11,6 @@ namespace AutoApplicator.App.Components.Pages.Jobs;
 public partial class JobList
 {
     [Inject] private IMediator Mediator { get; set; } = default!;
-    [Inject] private IJobRepository JobRepo { get; set; } = default!;
     [Inject] private NavigationManager Navigation { get; set; } = default!;
 
     private List<JobListing> _allJobs = [];
@@ -80,7 +78,7 @@ public partial class JobList
     private async Task BatchDelete()
     {
         foreach (var id in _selectedIds.ToList())
-            await JobRepo.DeleteAsync(id, default);
+            await Mediator.Send(new DeleteJobCommand(id));
         await LoadJobs();
     }
 
@@ -95,17 +93,4 @@ public partial class JobList
         await Mediator.Send(new RejectJobCommand(job.Id));
         await LoadJobs();
     }
-
-    private static BadgeStyle GetStatusBadge(JobStatus status) => status switch
-    {
-        JobStatus.New => BadgeStyle.Info,
-        JobStatus.Reviewed => BadgeStyle.Warning,
-        JobStatus.Approved => BadgeStyle.Success,
-        JobStatus.Rejected => BadgeStyle.Danger,
-        JobStatus.Applied => BadgeStyle.Primary,
-        JobStatus.Pending => BadgeStyle.Warning,
-        JobStatus.Skipped => BadgeStyle.Light,
-        JobStatus.Error => BadgeStyle.Danger,
-        _ => BadgeStyle.Light,
-    };
 }

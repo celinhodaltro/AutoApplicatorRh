@@ -1,5 +1,7 @@
-@using AutoApplicator.Infrastructure.Services
-@inject AutomationService AutomationService
+@using AutoApplicator.Application.Interfaces
+@using Microsoft.Extensions.Logging
+@inject IAutomationStateService AutomationService
+@inject ILogger<TopBar> Logger
 
 <div class="topbar">
     <div class="topbar-left">
@@ -93,7 +95,7 @@
     private async void OnAutomationStatusChanged()
     {
         try { await InvokeAsync(StateHasChanged); }
-        catch { }
+        catch (Exception ex) { Logger.LogDebug(ex, "StateHasChanged failed on status change"); }
     }
 
     private async Task StartAutomation()

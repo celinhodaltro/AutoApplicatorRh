@@ -1,4 +1,5 @@
-﻿using AutoApplicator.Infrastructure.Services.Exceptions;
+﻿using AutoApplicator.Application.Interfaces;
+using AutoApplicator.Infrastructure.Services.Exceptions;
 using Microsoft.Extensions.Logging;
 
 namespace AutoApplicator.Infrastructure.Services;

@@ -16,7 +16,6 @@ public sealed class AppDbContext : DbContext
     public DbSet<SearchProfile> SearchProfiles => Set<SearchProfile>();
     public DbSet<JobListing> JobListings => Set<JobListing>();
     public DbSet<CollectedQuestion> CollectedQuestions => Set<CollectedQuestion>();
-    public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
 
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
     {
@@ -62,16 +61,6 @@ public sealed class AppDbContext : DbContext
             entity.Property(e => e.Platform).HasConversion<int?>();
             entity.Property(e => e.Group).HasMaxLength(200);
             SetStringListConversion(entity.Property(e => e.Options));
-        });
-
-        modelBuilder.Entity<UserProfile>(entity =>
-        {
-            entity.ToTable("UserProfiles");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedNever();
-            SetStringListConversion(entity.Property(e => e.Skills));
-            SetStringListConversion(entity.Property(e => e.Experience));
-            SetDictionaryConversion(entity.Property(e => e.Preferences));
         });
     }
 

@@ -39,7 +39,7 @@ public partial class Settings
             Preferences.Set("max_applications", _maxApplications);
             Preferences.Set("headless_mode", _headlessMode);
         }
-        catch { }
+        catch { /* Preferences save failed */ }
     }
 
     private void OpenLogin(PlatformType platform)
@@ -62,7 +62,7 @@ public partial class Settings
             };
             System.Diagnostics.Process.Start(psi);
         }
-        catch { }
+        catch { /* Failed to open browser */ }
     }
 
     private void OpenLogsFolder()

@@ -1,6 +1,7 @@
-﻿using AutoApplicator.Domain.Entities;
+﻿using AutoApplicator.Application.Commands.Profiles;
+using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
-using AutoApplicator.Domain.Interfaces;
+using MediatR;
 using Microsoft.AspNetCore.Components;
 using Radzen;
 
@@ -9,7 +10,7 @@ namespace AutoApplicator.App.Components.Pages.Profiles;
 public partial class ProfileEditDialog
 {
     [Inject] private DialogService DialogService { get; set; } = default!;
-    [Inject] private IProfileRepository ProfileRepo { get; set; } = default!;
+    [Inject] private IMediator Mediator { get; set; } = default!;
 
     [Parameter] public SearchProfile Profile { get; set; } = default!;
     [Parameter] public bool IsNew { get; set; }
@@ -95,13 +96,9 @@ public partial class ProfileEditDialog
         if (IsNew)
         {
             _editingProfile.CreatedAt = DateTime.UtcNow;
-            await ProfileRepo.AddAsync(_editingProfile, default);
-        }
-        else
-        {
-            await ProfileRepo.UpdateAsync(_editingProfile, default);
         }
 
+        await Mediator.Send(new SaveProfileCommand(_editingProfile, IsNew));
         DialogService.Close(true);
     }
 

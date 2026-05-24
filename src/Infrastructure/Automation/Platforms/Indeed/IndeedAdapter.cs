@@ -67,7 +67,7 @@ public sealed class IndeedAdapter : IPlatformAdapter
                 }
             }
         }
-        catch { }
+        catch { /* dismiss cookie modal, ignore error */ }
 
         return new AuthCheckResult { IsAuthenticated = true };
     }

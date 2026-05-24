@@ -73,7 +73,7 @@ public sealed class LinkedInAdapter : IPlatformAdapter
                 if (visible)
                     return new AuthCheckResult { IsAuthenticated = true };
             }
-            catch { }
+            catch { /* try next selector */ }
         }
 
         var url = page.Url;
@@ -93,7 +93,7 @@ public sealed class LinkedInAdapter : IPlatformAdapter
                     Message = signIn ? "LinkedIn: please log in first" : ""
                 };
             }
-            catch { }
+            catch { /* try next approach */ }
         }
 
         return new AuthCheckResult

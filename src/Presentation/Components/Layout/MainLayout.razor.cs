@@ -1,13 +1,15 @@
-using AutoApplicator.Infrastructure.Services;
+using AutoApplicator.Application.Interfaces;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
+using Microsoft.Extensions.Logging;
 
 namespace AutoApplicator.App.Components.Layout;
 
 public partial class MainLayout : LayoutComponentBase, IDisposable
 {
-    [Inject] private AutomationService AutomationService { get; set; } = default!;
+    [Inject] private IAutomationStateService AutomationService { get; set; } = default!;
     [Inject] private NavigationManager Navigation { get; set; } = default!;
+    [Inject] private ILogger<MainLayout> Logger { get; set; } = default!;
 
     private bool _sidebarExpanded = true;
     private string _currentUrl = "";
@@ -28,7 +30,7 @@ public partial class MainLayout : LayoutComponentBase, IDisposable
     private async void OnStatusChanged()
     {
         try { await InvokeAsync(StateHasChanged); }
-        catch { }
+        catch (Exception ex) { Logger.LogDebug(ex, "StateHasChanged failed on status change"); }
     }
 
     private void ToggleSidebar()

@@ -1,27 +1,28 @@
+using AutoApplicator.Application.Interfaces;
+
 namespace AutoApplicator.Infrastructure.Services;
 
-public sealed class NotificationService
+public sealed class NotificationService : INotificationService
 {
-    private readonly List<Notification> _notifications = [];
+    private readonly List<NotificationItem> _notifications = [];
     private static readonly int MaxNotifications = 50;
 
     public event Action? NotificationsChanged;
 
-    public IReadOnlyList<Notification> Notifications => _notifications.AsReadOnly();
+    IReadOnlyList<NotificationItem> INotificationService.Notifications => _notifications.AsReadOnly();
     public int UnreadCount => _notifications.Count(n => !n.IsRead);
 
     public void Add(NotificationType type, string title, string message, string? actionLabel = null, string? actionUrl = null)
     {
-        var notification = new Notification
-        {
-            Id = Guid.NewGuid(),
-            Type = type,
-            Title = title,
-            Message = message,
-            Timestamp = DateTime.Now,
-            ActionLabel = actionLabel,
-            ActionUrl = actionUrl
-        };
+        var notification = new NotificationItem(
+            Guid.NewGuid(),
+            type,
+            title,
+            message,
+            DateTime.Now,
+            false,
+            actionLabel,
+            actionUrl);
 
         _notifications.Insert(0, notification);
 
@@ -33,18 +34,19 @@ public sealed class NotificationService
 
     public void MarkAsRead(Guid id)
     {
-        var notification = _notifications.FirstOrDefault(n => n.Id == id);
-        if (notification is not null)
+        var index = _notifications.FindIndex(n => n.Id == id);
+        if (index >= 0)
         {
-            notification.IsRead = true;
+            var old = _notifications[index];
+            _notifications[index] = old with { IsRead = true };
             NotificationsChanged?.Invoke();
         }
     }
 
     public void MarkAllAsRead()
     {
-        foreach (var n in _notifications)
-            n.IsRead = true;
+        for (var i = 0; i < _notifications.Count; i++)
+            _notifications[i] = _notifications[i] with { IsRead = true };
         NotificationsChanged?.Invoke();
     }
 
@@ -53,24 +55,4 @@ public sealed class NotificationService
         _notifications.Clear();
         NotificationsChanged?.Invoke();
     }
-}
-
-public enum NotificationType
-{
-    Info,
-    Success,
-    Warning,
-    Error
-}
-
-public sealed class Notification
-{
-    public Guid Id { get; init; }
-    public NotificationType Type { get; init; }
-    public string Title { get; init; } = string.Empty;
-    public string Message { get; init; } = string.Empty;
-    public DateTime Timestamp { get; init; }
-    public bool IsRead { get; set; }
-    public string? ActionLabel { get; init; }
-    public string? ActionUrl { get; init; }
 }

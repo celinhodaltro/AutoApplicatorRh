@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
 using AutoApplicator.Domain.Interfaces;
@@ -10,19 +11,18 @@ using Microsoft.Extensions.Logging;
 
 namespace AutoApplicator.Infrastructure.Services;
 
-public sealed class AutomationService
+public sealed class AutomationService : IAutomationStateService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly PlaywrightService _playwrightService;
     private readonly PlatformAdapterFactory _adapterFactory;
     private readonly NotificationService _notifications;
     private readonly ILogger<AutomationService> _logger;
-    private readonly LinkedInApplicator _linkedInApplicator;
     private readonly ExceptionHandlerService _exceptionHandler;
     private CancellationTokenSource? _cts;
 
     public bool IsRunning { get; private set; }
-    public AutomationStatus CurrentStatus { get; private set; } = new();
+    public AutomationStatusInfo CurrentStatus { get; private set; } = new();
 
     public event Action? StatusChanged;
 
@@ -32,7 +32,6 @@ public sealed class AutomationService
         PlatformAdapterFactory adapterFactory,
         NotificationService notifications,
         ILogger<AutomationService> logger,
-        LinkedInApplicator linkedInApplicator,
         ExceptionHandlerService exceptionHandler)
     {
         _scopeFactory = scopeFactory;
@@ -40,7 +39,6 @@ public sealed class AutomationService
         _adapterFactory = adapterFactory;
         _notifications = notifications;
         _logger = logger;
-        _linkedInApplicator = linkedInApplicator;
         _exceptionHandler = exceptionHandler;
     }
 
@@ -158,13 +156,7 @@ public sealed class AutomationService
 
     private async Task RunApplyAsync(CancellationToken token)
     {
-        List<JobListing> approvedJobs;
-        using (var scope = _scopeFactory.CreateScope())
-        {
-            var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
-            var allJobs = (await jobRepo.GetAllAsync(default)).ToList();
-            approvedJobs = allJobs.Where(j => j.Status == JobStatus.Approved).ToList();
-        }
+        var approvedJobs = await GetApprovedJobsAsync();
 
         _logger.LogInformation("Found {Count} approved job(s) to apply", approvedJobs.Count);
 
@@ -190,54 +182,11 @@ public sealed class AutomationService
 
             try
             {
-                await page.GotoAsync(job.Url, new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded });
-                await Task.Delay(3000, token);
+                var result = await ProcessJobApplicationAsync(page, job, i + 1, approvedJobs.Count, token);
+                await UpdateJobAfterApplyAsync(job, result, i + 1, approvedJobs.Count);
 
-                ApplyResult result;
-
-                if (job.Platform == PlatformType.LinkedIn)
-                {
-                    result = await _linkedInApplicator.ApplyAsync(page, job);
-                }
-                else
-                {
-                    _logger.LogWarning("[{Current}/{Total}] Apply not yet supported for {Platform}", i + 1, approvedJobs.Count, job.Platform);
-                    result = new ApplyResult(false, $"Apply not supported for {job.Platform}");
-                }
-
-                using (var scope = _scopeFactory.CreateScope())
-                {
-                    var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
-                    var dbJob = await jobRepo.GetByIdAsync(job.Id, default);
-                    if (dbJob is not null)
-                    {
-                        if (result.Success)
-                        {
-                            dbJob.Status = JobStatus.Applied;
-                            dbJob.AppliedAt = DateTime.UtcNow;
-                            dbJob.ApplicationAnswers = result.AnswersUsed;
-                            appliedCount++;
-                            _logger.LogInformation("[{Current}/{Total}] ✅ Applied: '{Title}'", i + 1, approvedJobs.Count, job.Title);
-                            _notifications.Add(NotificationType.Success, "Applied", $"{job.Title} at {job.Company}");
-                        }
-                        else if (result.NeedsManualIntervention)
-                        {
-                            dbJob.Status = JobStatus.Pending;
-                            dbJob.UserNotes = result.ErrorMessage;
-                            pendingCount++;
-                            _logger.LogInformation("[{Current}/{Total}] ⏭️ Saved for later: '{Title}' (needs answers)", i + 1, approvedJobs.Count, job.Title);
-                            _notifications.Add(NotificationType.Warning, "Pending", $"{job.Title} — configure answers in Questions tab");
-                        }
-                        else
-                        {
-                            dbJob.Status = JobStatus.Error;
-                            dbJob.UserNotes = result.ErrorMessage;
-                            _logger.LogWarning("[{Current}/{Total}] ❌ Failed: '{Title}': {Error}", i + 1, approvedJobs.Count, job.Title, result.ErrorMessage);
-                        }
-                        dbJob.UpdatedAt = DateTime.UtcNow;
-                        await jobRepo.UpdateAsync(dbJob, default);
-                    }
-                }
+                if (result.Success) appliedCount++;
+                else if (result.NeedsManualIntervention) pendingCount++;
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -256,6 +205,63 @@ public sealed class AutomationService
             _notifications.Add(NotificationType.Warning, "Apply Complete", "No jobs were applied.");
     }
 
+    private async Task<List<JobListing>> GetApprovedJobsAsync()
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
+        var allJobs = (await jobRepo.GetAllAsync(default)).ToList();
+        return allJobs.Where(j => j.Status == JobStatus.Approved).ToList();
+    }
+
+    private async Task<ApplyResult> ProcessJobApplicationAsync(Microsoft.Playwright.IPage page, JobListing job, int current, int total, CancellationToken token)
+    {
+        await page.GotoAsync(job.Url, new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded });
+        await Task.Delay(3000, token);
+
+        if (job.Platform == PlatformType.LinkedIn)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var linkedInApplicator = scope.ServiceProvider.GetRequiredService<LinkedInApplicator>();
+            return await linkedInApplicator.ApplyAsync(page, job);
+        }
+
+        _logger.LogWarning("[{Current}/{Total}] Apply not yet supported for {Platform}", current, total, job.Platform);
+        return new ApplyResult(false, $"Apply not supported for {job.Platform}");
+    }
+
+    private async Task UpdateJobAfterApplyAsync(JobListing job, ApplyResult result, int current, int total)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
+        var dbJob = await jobRepo.GetByIdAsync(job.Id, default);
+        if (dbJob is null) return;
+
+        if (result.Success)
+        {
+            dbJob.Status = JobStatus.Applied;
+            dbJob.AppliedAt = DateTime.UtcNow;
+            dbJob.ApplicationAnswers = result.AnswersUsed;
+            _logger.LogInformation("[{Current}/{Total}] ✅ Applied: '{Title}'", current, total, job.Title);
+            _notifications.Add(NotificationType.Success, "Applied", $"{job.Title} at {job.Company}");
+        }
+        else if (result.NeedsManualIntervention)
+        {
+            dbJob.Status = JobStatus.Pending;
+            dbJob.UserNotes = result.ErrorMessage;
+            _logger.LogInformation("[{Current}/{Total}] ⏭️ Saved for later: '{Title}' (needs answers)", current, total, job.Title);
+            _notifications.Add(NotificationType.Warning, "Pending", $"{job.Title} — configure answers in Questions tab");
+        }
+        else
+        {
+            dbJob.Status = JobStatus.Error;
+            dbJob.UserNotes = result.ErrorMessage;
+            _logger.LogWarning("[{Current}/{Total}] ❌ Failed: '{Title}': {Error}", current, total, job.Title, result.ErrorMessage);
+        }
+
+        dbJob.UpdatedAt = DateTime.UtcNow;
+        await jobRepo.UpdateAsync(dbJob, default);
+    }
+
     private async Task<int> SearchProfileAsync(
         SearchProfile profile, Microsoft.Playwright.IPage page,
         int current, int total, bool globalEasyApply, CancellationToken token)
@@ -267,15 +273,8 @@ public sealed class AutomationService
 
         try
         {
-            var searchUrl = adapter.BuildSearchUrl(profile);
-            _logger.LogInformation("[{Current}/{Total}] URL: {SearchUrl}", current, total, searchUrl);
-
-            await page.GotoAsync(searchUrl, new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded });
-            await Task.Delay(3000, token);
-
-            var auth = await adapter.IsAuthenticatedAsync(page);
-            if (!auth.IsAuthenticated)
-                throw new LoginRequiredException(profile.Platform.ToString(), auth.LoginUrl);
+            var searchUrl = await NavigateToSearchUrlAsync(adapter, profile, page, current, total, token);
+            await CheckAuthenticationAsync(adapter, page, profile);
 
             UpdateStatus($"Extracting listings for {profile.Name}...", current, total);
             var extractedJobs = await adapter.ExtractListingsAsync(page);
@@ -294,31 +293,8 @@ public sealed class AutomationService
 
                 UpdateStatus($"Opening: {extracted.Title} ({i + 1}/{extractedJobs.Count})", current, total);
 
-                JobDetail? details = null;
-                try
-                {
-                    details = await adapter.ExtractJobDetailsAsync(page, extracted.Url);
-
-                    if (details is not null)
-                    {
-                        if (!string.IsNullOrEmpty(details.Title)) extracted = extracted with { Title = details.Title };
-                        if (!string.IsNullOrEmpty(details.Company)) extracted = extracted with { Company = details.Company };
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed fetching details for '{Title}'", extracted.Title);
-                }
-
-                try
-                {
-                    await page.GotoAsync(searchUrl, new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded });
-                    await Task.Delay(2000, token);
-                }
-                catch
-                {
-                    _logger.LogWarning("Failed to navigate back to search results");
-                }
+                var (details, updatedExtracted) = await FetchJobDetailsAsync(page, adapter, extracted, searchUrl, token);
+                extracted = updatedExtracted;
 
                 var isEasyApply = extracted.EasyApply;
 
@@ -331,27 +307,7 @@ public sealed class AutomationService
                 _logger.LogInformation("[{Current}/{Total}] Saving job: '{Title}' at {Company} | EasyApply: {EasyApply} | Desc: {DescLen} chars",
                     current, total, extracted.Title, extracted.Company, isEasyApply, details?.Description?.Length ?? 0);
 
-                var job = new JobListing
-                {
-                    Id = Guid.NewGuid(),
-                    ExternalId = extracted.ExternalId,
-                    Platform = profile.Platform,
-                    ProfileId = profile.Id,
-                    Url = extracted.Url,
-                    Title = extracted.Title,
-                    Company = extracted.Company,
-                    Location = extracted.Location,
-                    Description = details?.Description ?? string.Empty,
-                    Salary = details?.Salary,
-                    JobType = string.Join(", ", profile.JobTypes),
-                    PostedDate = DateTime.UtcNow,
-                    EasyApply = isEasyApply,
-                    Status = JobStatus.New,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-
-                await jobRepo.AddAsync(job, default);
+                await SaveJobAsync(jobRepo, extracted, details, profile, isEasyApply);
                 savedCount++;
             }
 
@@ -368,15 +324,89 @@ public sealed class AutomationService
         }
     }
 
+    private async Task<string> NavigateToSearchUrlAsync(
+        IPlatformAdapter adapter, SearchProfile profile, Microsoft.Playwright.IPage page,
+        int current, int total, CancellationToken token)
+    {
+        var searchUrl = adapter.BuildSearchUrl(profile);
+        _logger.LogInformation("[{Current}/{Total}] URL: {SearchUrl}", current, total, searchUrl);
+
+        await page.GotoAsync(searchUrl, new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded });
+        await Task.Delay(3000, token);
+
+        return searchUrl;
+    }
+
+    private static async Task CheckAuthenticationAsync(IPlatformAdapter adapter, Microsoft.Playwright.IPage page, SearchProfile profile)
+    {
+        var auth = await adapter.IsAuthenticatedAsync(page);
+        if (!auth.IsAuthenticated)
+            throw new LoginRequiredException(profile.Platform.ToString(), auth.LoginUrl);
+    }
+
+    private async Task<(JobDetail? Details, ExtractedJob UpdatedExtracted)> FetchJobDetailsAsync(
+        Microsoft.Playwright.IPage page, IPlatformAdapter adapter, ExtractedJob extracted,
+        string searchUrl, CancellationToken token)
+    {
+        JobDetail? details = null;
+        try
+        {
+            details = await adapter.ExtractJobDetailsAsync(page, extracted.Url);
+
+            if (details is not null)
+            {
+                if (!string.IsNullOrEmpty(details.Title)) extracted = extracted with { Title = details.Title };
+                if (!string.IsNullOrEmpty(details.Company)) extracted = extracted with { Company = details.Company };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed fetching details for '{Title}'", extracted.Title);
+        }
+
+        try
+        {
+            await page.GotoAsync(searchUrl, new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded });
+            await Task.Delay(2000, token);
+        }
+        catch
+        {
+            _logger.LogWarning("Failed to navigate back to search results");
+        }
+
+        return (details, extracted);
+    }
+
+    private static async Task SaveJobAsync(
+        IJobRepository jobRepo, ExtractedJob extracted, JobDetail? details,
+        SearchProfile profile, bool isEasyApply)
+    {
+        var job = new JobListing
+        {
+            Id = Guid.NewGuid(),
+            ExternalId = extracted.ExternalId,
+            Platform = profile.Platform,
+            ProfileId = profile.Id,
+            Url = extracted.Url,
+            Title = extracted.Title,
+            Company = extracted.Company,
+            Location = extracted.Location,
+            Description = details?.Description ?? string.Empty,
+            Salary = details?.Salary,
+            JobType = string.Join(", ", profile.JobTypes),
+            PostedDate = DateTime.UtcNow,
+            EasyApply = isEasyApply,
+            Status = JobStatus.New,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        await jobRepo.AddAsync(job, default);
+    }
+
     private void UpdateStatus(string message, int current, int total)
     {
-        CurrentStatus = new AutomationStatus(message, current, total);
+        CurrentStatus = new AutomationStatusInfo(message, current, total);
         StatusChanged?.Invoke();
     }
-}
-
-public sealed record AutomationStatus(string Message, int Current, int Total)
-{
-    public AutomationStatus() : this("Idle", 0, 0) { }
-    public string Progress => Total > 0 ? $"{Current}/{Total}" : "";
 }

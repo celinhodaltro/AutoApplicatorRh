@@ -235,20 +235,36 @@ public sealed class LinkedInExtractor
 
     private async Task<string> ExtractDescriptionAsync(IPage page)
     {
-        // Strategy 1: CSS selectors
+        var description = await ExtractDescriptionViaCssSelectorsAsync(page);
+        if (!string.IsNullOrEmpty(description)) return description;
+
+        string html;
+        try { html = await page.ContentAsync(); }
+        catch { /* try next fallback */ return string.Empty; }
+
+        description = await ExtractDescriptionViaHtmlRegexAsync(html);
+        if (!string.IsNullOrEmpty(description)) return description;
+
+        description = await ExtractDescriptionViaKeywordSearch(html);
+        if (!string.IsNullOrEmpty(description)) return description;
+
+        description = await ExtractDescriptionViaLongestBlock(html);
+        return description;
+    }
+
+    private async Task<string> ExtractDescriptionViaCssSelectorsAsync(IPage page)
+    {
         var description = await QuickTextAsync(page, DetailDescriptionSelectors);
         if (!string.IsNullOrEmpty(description))
         {
             _logger.LogInformation("Extracted description via CSS selectors ({Length} chars)", description.Length);
             return description;
         }
+        return string.Empty;
+    }
 
-        // Get HTML for all fallback strategies
-        string html;
-        try { html = await page.ContentAsync(); }
-        catch { return string.Empty; }
-
-        // Strategy 2: Page HTML with regex containers
+    private async Task<string> ExtractDescriptionViaHtmlRegexAsync(string html)
+    {
         try
         {
             var patterns = new[]
@@ -277,8 +293,11 @@ public sealed class LinkedInExtractor
             }
         }
         catch (Exception ex) { _logger.LogWarning(ex, "HTML regex extraction failed"); }
+        return string.Empty;
+    }
 
-        // Strategy 3: Strip all HTML and find description by keywords
+    private async Task<string> ExtractDescriptionViaKeywordSearch(string html)
+    {
         try
         {
             var bodyText = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " ");
@@ -296,8 +315,11 @@ public sealed class LinkedInExtractor
             }
         }
         catch (Exception ex) { _logger.LogWarning(ex, "Keyword extraction failed"); }
+        return string.Empty;
+    }
 
-        // Strategy 4: Longest text block in the page
+    private async Task<string> ExtractDescriptionViaLongestBlock(string html)
+    {
         try
         {
             var textBlocks = new List<string>();
@@ -319,7 +341,6 @@ public sealed class LinkedInExtractor
             }
         }
         catch (Exception ex) { _logger.LogWarning(ex, "Longest text block failed"); }
-
         return string.Empty;
     }
 
@@ -378,7 +399,7 @@ public sealed class LinkedInExtractor
                 return match ? match[0] : null;
             ");
         }
-        catch { return null; }
+        catch { /* try next fallback */ return null; }
     }
 
 
@@ -400,7 +421,7 @@ public sealed class LinkedInExtractor
                 if (paramMatch.Success) return paramMatch.Groups[1].Value;
             }
         }
-        catch { /* ignore */ }
+        catch { /* try next link */ }
         return null;
     }
 }

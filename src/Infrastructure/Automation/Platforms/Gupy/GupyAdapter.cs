@@ -104,7 +104,7 @@ public sealed class GupyAdapter : IPlatformAdapter
                         EasyApply = false
                     });
                 }
-                catch { /* skip failed card */ }
+                catch { /* try next selector */ }
             }
         }
         catch (Exception ex)

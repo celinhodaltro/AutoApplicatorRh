@@ -1,7 +1,10 @@
 @page "/profiles"
 @using Radzen
 @using Radzen.Blazor
-@inject IProfileRepository ProfileRepo
+@using MediatR
+@using AutoApplicator.Application.Queries.Profiles
+@using AutoApplicator.Application.Commands.Profiles
+@inject IMediator Mediator
 @inject DialogService DialogService
 
 <RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 24px;">Search Profiles</RadzenText>
@@ -51,7 +54,7 @@
 
     private async Task LoadProfiles()
     {
-        _profiles = (await ProfileRepo.GetAllAsync(default)).ToList();
+        _profiles = await Mediator.Send(new GetProfilesQuery());
     }
 
     private async Task OpenNew()
@@ -102,7 +105,7 @@
     {
         profile.Enabled = value;
         profile.UpdatedAt = DateTime.UtcNow;
-        await ProfileRepo.UpdateAsync(profile, default);
+        await Mediator.Send(new SaveProfileCommand(profile, false));
     }
 
     private async Task ConfirmDelete(SearchProfile profile)
@@ -118,7 +121,7 @@
 
         if (confirmed == true)
         {
-            await ProfileRepo.DeleteAsync(profile.Id, default);
+            await Mediator.Send(new DeleteProfileCommand(profile.Id));
             await LoadProfiles();
         }
     }

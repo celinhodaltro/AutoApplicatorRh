@@ -1,0 +1,23 @@
+@* StatusBadge.razor *@
+@using Radzen
+@using AutoApplicator.Domain.Enums
+
+<RadzenBadge BadgeStyle="@GetStyle()" class="@Class">@Status</RadzenBadge>
+
+@code {
+    [Parameter] public JobStatus Status { get; set; }
+    [Parameter] public string? Class { get; set; }
+    
+    private BadgeStyle GetStyle() => Status switch
+    {
+        JobStatus.New => BadgeStyle.Info,
+        JobStatus.Reviewed => BadgeStyle.Warning,
+        JobStatus.Approved => BadgeStyle.Success,
+        JobStatus.Rejected => BadgeStyle.Danger,
+        JobStatus.Applied => BadgeStyle.Primary,
+        JobStatus.Pending => BadgeStyle.Warning,
+        JobStatus.Skipped => BadgeStyle.Light,
+        JobStatus.Error => BadgeStyle.Danger,
+        _ => BadgeStyle.Light,
+    };
+}
