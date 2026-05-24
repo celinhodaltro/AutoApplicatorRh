@@ -1,3 +1,4 @@
+using AutoApplicator.Infrastructure.Automation.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 

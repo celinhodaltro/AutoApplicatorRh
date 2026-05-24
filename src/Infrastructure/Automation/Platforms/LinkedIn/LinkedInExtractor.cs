@@ -1,3 +1,6 @@
+using AutoApplicator.Infrastructure.Automation.Abstractions;
+using AutoApplicator.Infrastructure.Automation.Common;
+using AutoApplicator.Infrastructure.Automation.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 
@@ -5,69 +8,18 @@ namespace AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn;
 
 public sealed class LinkedInExtractor
 {
-    private readonly ILogger _logger;
-    private readonly HumanBehavior _behavior;
+    private readonly IEnumerable<IDescriptionExtractor> _descriptionExtractors;
+    private readonly IHumanBehavior _behavior;
+    private readonly ILogger<LinkedInExtractor> _logger;
 
-    private static readonly string[] JobCardSelectors =
-    [
-        ".job-card-container",
-        ".jobs-search-results__list-item",
-        "li[data-occludable-job-id]",
-        ".scaffold-layout__list-item"
-    ];
-
-    private static readonly string[] CardTitleSelectors =
-    [
-        ".job-card-list__title",
-        "a.job-card-container__link",
-        ".artdeco-entity-lockup__title a",
-        "a[class*=\"job-card-list__title\"]"
-    ];
-
-    private static readonly string[] CardCompanySelectors =
-    [
-        ".job-card-container__primary-description",
-        ".artdeco-entity-lockup__subtitle",
-        ".job-card-container__company-name"
-    ];
-
-    private static readonly string[] CardLocationSelectors =
-    [
-        ".job-card-container__metadata-item",
-        ".artdeco-entity-lockup__caption",
-        ".job-card-container__metadata-wrapper li"
-    ];
-
-    private static readonly string[] DetailDescriptionSelectors =
-    [
-        "#job-details",
-        ".jobs-description__content",
-        ".jobs-description-content__text",
-        ".jobs-box__html-content",
-        "article[class*=\"jobs-description\"]",
-        ".jobs-description",
-        "div[class*=\"description__text\"]",
-        ".job-details-about-the-job-module"
-    ];
-
-    private static readonly string[] DetailSalarySelectors =
-    [
-        ".job-details-jobs-unified-top-card__job-insight span",
-        "[class*=\"salary\"]",
-        ".compensation__salary"
-    ];
-
-    private static readonly string[] DetailPostedDateSelectors =
-    [
-        ".job-details-jobs-unified-top-card__primary-description-container span",
-        "time",
-        ".jobs-unified-top-card__posted-date"
-    ];
-
-    public LinkedInExtractor(ILogger logger)
+    public LinkedInExtractor(
+        IEnumerable<IDescriptionExtractor> descriptionExtractors,
+        IHumanBehavior behavior,
+        ILogger<LinkedInExtractor> logger)
     {
+        _descriptionExtractors = descriptionExtractors;
+        _behavior = behavior;
         _logger = logger;
-        _behavior = new HumanBehavior();
     }
 
     public async Task<List<ExtractedJob>> ExtractJobCardsAsync(IPage page)
@@ -76,7 +28,7 @@ public sealed class LinkedInExtractor
         var extractedIds = new HashSet<string>();
 
         IReadOnlyList<IElementHandle> cardElements = [];
-        foreach (var sel in JobCardSelectors)
+        foreach (var sel in LinkedInSelectors.JobCardSelectors)
         {
             cardElements = await page.QuerySelectorAllAsync(sel);
             if (cardElements.Count > 0)
@@ -165,14 +117,14 @@ public sealed class LinkedInExtractor
 
         if (string.IsNullOrEmpty(jobId)) return null;
 
-        var title = await GetFirstVisibleTextAsync(el, CardTitleSelectors);
+        var title = await SelectorHelper.GetFirstVisibleTextAsync(el, LinkedInSelectors.CardTitleSelectors);
         if (string.IsNullOrEmpty(title)) return null;
 
-        var company = await GetFirstVisibleTextAsync(el, CardCompanySelectors);
-        var location = await GetFirstVisibleTextAsync(el, CardLocationSelectors);
+        var company = await SelectorHelper.GetFirstVisibleTextAsync(el, LinkedInSelectors.CardCompanySelectors);
+        var location = await SelectorHelper.GetFirstVisibleTextAsync(el, LinkedInSelectors.CardLocationSelectors);
 
         var url = string.Empty;
-        foreach (var sel in CardTitleSelectors)
+        foreach (var sel in LinkedInSelectors.CardTitleSelectors)
         {
             try
             {
@@ -210,7 +162,7 @@ public sealed class LinkedInExtractor
 
         var salary = await ExtractSalaryAsync(page);
 
-        var postedDate = await QuickTextAsync(page, DetailPostedDateSelectors);
+        var postedDate = await SelectorHelper.QuickTextAsync(page, LinkedInSelectors.DetailPostedDateSelectors);
         string? postedDateStr = null;
         if (!string.IsNullOrEmpty(postedDate))
         {
@@ -235,148 +187,23 @@ public sealed class LinkedInExtractor
 
     private async Task<string> ExtractDescriptionAsync(IPage page)
     {
-        var description = await ExtractDescriptionViaCssSelectorsAsync(page);
-        if (!string.IsNullOrEmpty(description)) return description;
-
-        string html;
-        try { html = await page.ContentAsync(); }
-        catch { /* try next fallback */ return string.Empty; }
-
-        description = await ExtractDescriptionViaHtmlRegexAsync(html);
-        if (!string.IsNullOrEmpty(description)) return description;
-
-        description = await ExtractDescriptionViaKeywordSearch(html);
-        if (!string.IsNullOrEmpty(description)) return description;
-
-        description = await ExtractDescriptionViaLongestBlock(html);
-        return description;
-    }
-
-    private async Task<string> ExtractDescriptionViaCssSelectorsAsync(IPage page)
-    {
-        var description = await QuickTextAsync(page, DetailDescriptionSelectors);
-        if (!string.IsNullOrEmpty(description))
+        var html = await page.ContentAsync();
+        foreach (var extractor in _descriptionExtractors.OrderBy(e => e.Priority))
         {
-            _logger.LogInformation("Extracted description via CSS selectors ({Length} chars)", description.Length);
-            return description;
-        }
-        return string.Empty;
-    }
-
-    private async Task<string> ExtractDescriptionViaHtmlRegexAsync(string html)
-    {
-        try
-        {
-            var patterns = new[]
+            var result = await extractor.ExtractAsync(page, html);
+            if (!string.IsNullOrEmpty(result))
             {
-                @"class=""[^""]*?(?:jobs-description__content|jobs-box__html|description__text|show-more-less|jobs-description)[^""]*?"">(.*?)</div>",
-                @"<article[^>]*class=""[^""]*jobs-description[^""]*""[^>]*>(.*?)</article>",
-                @"<div[^>]*id=""job-details""[^>]*>(.*?)</div>",
-                @"<section[^>]*class=""[^""]*description[^""]*""[^>]*>(.*?)</section>"
-            };
-
-            foreach (var pattern in patterns)
-            {
-                var match = System.Text.RegularExpressions.Regex.Match(html, pattern,
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
-                if (match.Success)
-                {
-                    var text = System.Text.RegularExpressions.Regex.Replace(match.Groups[1].Value, "<[^>]+>", " ");
-                    text = System.Net.WebUtility.HtmlDecode(text);
-                    text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
-                    if (text.Length > 50)
-                    {
-                        _logger.LogInformation("Extracted description via HTML regex ({Length} chars)", text.Length);
-                        return text;
-                    }
-                }
+                _logger.LogInformation("Description extracted via {Extractor} ({Length} chars)",
+                    extractor.GetType().Name, result.Length);
+                return result;
             }
-        }
-        catch (Exception ex) { _logger.LogWarning(ex, "HTML regex extraction failed"); }
-        return string.Empty;
-    }
-
-    private async Task<string> ExtractDescriptionViaKeywordSearch(string html)
-    {
-        try
-        {
-            var bodyText = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " ");
-            bodyText = System.Net.WebUtility.HtmlDecode(bodyText);
-            bodyText = System.Text.RegularExpressions.Regex.Replace(bodyText, @"\s+", " ").Trim();
-
-            var descMatch = System.Text.RegularExpressions.Regex.Match(bodyText,
-                @"(About the job|Qualifications|Responsibilities|Description|Job Description|Job details)[:\s]+(.{100,}?)(?=(Qualifications|Requirements|Skills|Experience|Education|About this role|$))",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            if (descMatch.Success)
-            {
-                var text = descMatch.Groups[2].Value.Trim();
-                _logger.LogInformation("Extracted description via keyword regex ({Length} chars)", text.Length);
-                return text;
-            }
-        }
-        catch (Exception ex) { _logger.LogWarning(ex, "Keyword extraction failed"); }
-        return string.Empty;
-    }
-
-    private async Task<string> ExtractDescriptionViaLongestBlock(string html)
-    {
-        try
-        {
-            var textBlocks = new List<string>();
-            var divs = System.Text.RegularExpressions.Regex.Split(html, @"<div[^>]*>", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            foreach (var block in divs)
-            {
-                var clean = System.Text.RegularExpressions.Regex.Replace(block, "<[^>]+>", " ");
-                clean = System.Net.WebUtility.HtmlDecode(clean);
-                clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\s+", " ").Trim();
-                if (clean.Length > 100 && !clean.Contains("nav") && !clean.Contains("header") && !clean.Contains("footer"))
-                    textBlocks.Add(clean);
-            }
-
-            var longest = textBlocks.OrderByDescending(t => t.Length).FirstOrDefault();
-            if (longest is not null)
-            {
-                _logger.LogInformation("Extracted description via longest text block ({Length} chars)", longest.Length);
-                return longest;
-            }
-        }
-        catch (Exception ex) { _logger.LogWarning(ex, "Longest text block failed"); }
-        return string.Empty;
-    }
-
-    private static async Task<string> GetFirstVisibleTextAsync(IElementHandle parent, string[] selectors)
-    {
-        foreach (var sel in selectors)
-        {
-            try
-            {
-                var el = await parent.QuerySelectorAsync(sel);
-                if (el is null) continue;
-                var text = (await el.InnerTextAsync())?.Trim();
-                if (!string.IsNullOrEmpty(text)) return text;
-            }
-            catch { /* try next */ }
-        }
-        return string.Empty;
-    }
-
-    private static async Task<string> QuickTextAsync(IPage page, string[] selectors)
-    {
-        foreach (var sel in selectors)
-        {
-            try
-            {
-                var text = await page.Locator(sel).First.InnerTextAsync(new() { Timeout = 1500 });
-                if (!string.IsNullOrEmpty(text?.Trim())) return text.Trim();
-            }
-            catch { /* try next */ }
         }
         return string.Empty;
     }
 
     private async Task<string?> ExtractSalaryAsync(IPage page)
     {
-        foreach (var sel in DetailSalarySelectors)
+        foreach (var sel in LinkedInSelectors.DetailSalarySelectors)
         {
             try
             {

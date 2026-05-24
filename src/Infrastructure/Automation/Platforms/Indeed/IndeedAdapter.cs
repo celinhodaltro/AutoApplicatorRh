@@ -1,5 +1,6 @@
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
+using AutoApplicator.Infrastructure.Automation.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 

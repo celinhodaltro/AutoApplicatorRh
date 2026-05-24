@@ -1,5 +1,8 @@
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
+using AutoApplicator.Infrastructure.Automation.Abstractions;
+using AutoApplicator.Infrastructure.Automation.Common;
+using AutoApplicator.Infrastructure.Automation.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 
@@ -11,59 +14,22 @@ public sealed class LinkedInAdapter : IPlatformAdapter
     public string BaseUrl => "https://www.linkedin.com";
 
     private readonly LinkedInExtractor _extractor;
-    private readonly HumanBehavior _behavior;
+    private readonly IHumanBehavior _behavior;
     private readonly ILogger<LinkedInAdapter> _logger;
 
-    private static readonly string[] PaginationSelectors =
-    [
-        ".artdeco-pagination__button--next",
-        "button[aria-label=\"Next\"]",
-        "[class*=\"pagination\"] button:last-child"
-    ];
-
-    private static readonly Dictionary<string, string> DatePostedMap = new()
+    public LinkedInAdapter(
+        LinkedInExtractor extractor,
+        IHumanBehavior behavior,
+        ILogger<LinkedInAdapter> logger)
     {
-        ["Past 24 Hours"] = "r86400",
-        ["Past Week"] = "r604800",
-        ["Past Month"] = "r2592000"
-    };
-
-    private static readonly Dictionary<string, string> JobTypeMap = new()
-    {
-        ["Full-time"] = "F",
-        ["Contract"] = "C",
-        ["Freelance"] = "T",
-        ["Part-time"] = "P"
-    };
-
-    private static readonly Dictionary<string, string> ExperienceMap = new()
-    {
-        ["Internship"] = "1",
-        ["Entry"] = "2",
-        ["Associate"] = "3",
-        ["Mid-Senior"] = "4",
-        ["Director"] = "5",
-        ["Executive"] = "6"
-    };
-
-    public LinkedInAdapter(ILogger<LinkedInAdapter> logger)
-    {
-        _extractor = new LinkedInExtractor(logger);
-        _behavior = new HumanBehavior();
+        _extractor = extractor;
+        _behavior = behavior;
         _logger = logger;
     }
 
     public async Task<AuthCheckResult> IsAuthenticatedAsync(IPage page)
     {
-        var authSelectors = new[]
-        {
-            ".global-nav__me-photo",
-            "img.global-nav__me-photo",
-            ".global-nav__primary-link-me-menu-trigger",
-            ".feed-identity-module__actor-meta"
-        };
-
-        foreach (var sel in authSelectors)
+        foreach (var sel in LinkedInSelectors.AuthSelectors)
         {
             try
             {
@@ -122,13 +88,13 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         if (profile.Location.Count > 0)
             parameters["location"] = profile.Location[0];
 
-        if (!string.IsNullOrEmpty(profile.DatePosted) && DatePostedMap.TryGetValue(profile.DatePosted, out var tpr))
+        if (!string.IsNullOrEmpty(profile.DatePosted) && LinkedInSelectors.DatePostedMap.TryGetValue(profile.DatePosted, out var tpr))
             parameters["f_TPR"] = tpr;
 
         if (profile.JobTypes.Count > 0)
         {
             var types = profile.JobTypes
-                .Select(t => JobTypeMap.GetValueOrDefault(t))
+                .Select(t => LinkedInSelectors.JobTypeMap.GetValueOrDefault(t))
                 .Where(t => t is not null)
                 .ToList();
             if (types.Count > 0)
@@ -138,7 +104,7 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         if (profile.ExperienceLevel.Count > 0)
         {
             var levels = profile.ExperienceLevel
-                .Select(l => ExperienceMap.GetValueOrDefault(l))
+                .Select(l => LinkedInSelectors.ExperienceMap.GetValueOrDefault(l))
                 .Where(l => l is not null)
                 .ToList();
             if (levels.Count > 0)
@@ -171,14 +137,7 @@ public sealed class LinkedInAdapter : IPlatformAdapter
 
     public async Task<List<ExtractedJob>> ExtractListingsAsync(IPage page)
     {
-        var listSelectors = new[]
-        {
-            ".jobs-search-results-list",
-            ".scaffold-layout__list",
-            ".jobs-search__results-list"
-        };
-
-        foreach (var sel in listSelectors)
+        foreach (var sel in LinkedInSelectors.ListSelectors)
         {
             var visible = await page.Locator(sel).First.IsVisibleAsync();
             if (visible)
@@ -193,7 +152,7 @@ public sealed class LinkedInAdapter : IPlatformAdapter
 
     public async Task<bool> HasNextPageAsync(IPage page)
     {
-        foreach (var sel in PaginationSelectors)
+        foreach (var sel in LinkedInSelectors.PaginationSelectors)
         {
             try
             {
@@ -212,7 +171,7 @@ public sealed class LinkedInAdapter : IPlatformAdapter
 
     public async Task GoToNextPageAsync(IPage page)
     {
-        foreach (var sel in PaginationSelectors)
+        foreach (var sel in LinkedInSelectors.PaginationSelectors)
         {
             try
             {
@@ -242,18 +201,10 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         });
         
         // Wait for job cards to actually render (lazy loading)
-        var cardSelectors = new[]
-        {
-            ".job-card-container",
-            ".jobs-search-results__list-item",
-            "li[data-occludable-job-id]",
-            ".scaffold-layout__list-item"
-        };
-        
         var cardsFound = false;
         for (var attempt = 0; attempt < 10; attempt++)
         {
-            foreach (var sel in cardSelectors)
+            foreach (var sel in LinkedInSelectors.NavigateCardSelectors)
             {
                 try
                 {

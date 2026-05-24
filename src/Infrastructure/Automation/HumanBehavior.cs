@@ -1,9 +1,10 @@
+using AutoApplicator.Infrastructure.Automation.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 
 namespace AutoApplicator.Infrastructure.Automation;
 
-public sealed class HumanBehavior
+public sealed class HumanBehavior : IHumanBehavior
 {
     private readonly ILogger<HumanBehavior> _logger;
     private static readonly Random Rng = new();

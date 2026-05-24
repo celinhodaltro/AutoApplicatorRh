@@ -4,6 +4,7 @@ using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
 using AutoApplicator.Domain.Interfaces;
+using AutoApplicator.Infrastructure.Automation.Models;
 using AutoApplicator.Infrastructure.Automation.Platforms;
 using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn;
 using AutoApplicator.Infrastructure.Services.Exceptions;

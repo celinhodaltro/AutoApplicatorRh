@@ -2,6 +2,10 @@ using AutoApplicator.Application.Commands.Questions;
 using AutoApplicator.Application.Queries.Questions;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
+using AutoApplicator.Infrastructure.Automation.Abstractions;
+using AutoApplicator.Infrastructure.Automation.Common;
+using AutoApplicator.Infrastructure.Automation.Models;
+using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn.StepNavigators;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
@@ -10,87 +14,27 @@ namespace AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn;
 
 public sealed class LinkedInApplicator
 {
+    private readonly IEnumerable<IFieldFiller> _fieldFillers;
+    private readonly IEnumerable<IStepNavigator> _stepNavigators;
+    private readonly IEnumerable<ISuccessDetector> _successDetectors;
+    private readonly IHumanBehavior _behavior;
     private readonly ILogger<LinkedInApplicator> _logger;
-    private readonly HumanBehavior _behavior;
     private readonly IMediator _mediator;
     private readonly Dictionary<string, string> _answersUsed = [];
 
-    private static readonly string[] EasyApplyButton =
-    [
-        "button.jobs-apply-button",
-        "a.jobs-apply-button",
-        "button[aria-label*=\"Easy Apply\"]",
-        "a[aria-label*=\"Easy Apply\"]",
-        "button[aria-label*=\"Candidatura\"]",
-        "a[aria-label*=\"Candidatura\"]",
-        "button[aria-label*=\"candidatura\"]",
-        "a[aria-label*=\"candidatura\"]",
-        "a[href*=\"apply/?openSDUIApplyFlow\"]",
-        ".jobs-apply-button--top-card button",
-        ".jobs-apply-button--top-card a",
-        "button.jobs-s-apply",
-        "a.jobs-s-apply"
-    ];
-
-    private static readonly string[] ModalContainer =
-    [
-        ".jobs-easy-apply-modal",
-        "[data-test-modal-id=\"easy-apply-modal\"]",
-        ".artdeco-modal--layer-default"
-    ];
-
-    private static readonly string[] NextButton =
-    [
-        "button[aria-label=\"Continue to next step\"]",
-        "button[aria-label=\"Avançar para próxima etapa\"]",
-        "button[aria-label*=\"Avançar\"]",
-        "button[aria-label*=\"Continuar\"]",
-        "button[aria-label*=\"Próxima\"]",
-        "button:has-text(\"Avançar\")",
-        "button:has-text(\"Continuar\")",
-        "button[data-easy-apply-next-button]",
-        "button[data-easy-apply-next-button]:not([disabled])",
-        ".artdeco-modal footer button.artdeco-button--primary:not([disabled])"
-    ];
-
-    private static readonly string[] ReviewButton =
-    [
-        "button[aria-label=\"Review your application\"]",
-        "button[aria-label=\"Revise sua candidatura\"]",
-        "button[data-easy-apply-review-button]",
-        "button[data-live-test-easy-apply-review-button]",
-        ".artdeco-modal footer button:has-text(\"Revisar\")",
-        ".artdeco-modal footer button:has-text(\"Review\")",
-        ".artdeco-modal footer button:has-text(\"Rever\")"
-    ];
-
-    private static readonly string[] SubmitButton =
-    [
-        "button[aria-label=\"Submit application\"]",
-        "button[aria-label=\"Enviar candidatura\"]",
-        "button[data-easy-apply-submit-button]",
-        "button[data-live-test-easy-apply-submit-button]",
-        ".artdeco-modal footer button.artdeco-button--primary:last-of-type:has-text(\"Enviar\")",
-        ".artdeco-modal footer button.artdeco-button--primary:last-of-type:has-text(\"Submit\")"
-    ];
-
-    private static readonly string[] DismissButton =
-    [
-        "button[aria-label=\"Dismiss\"]",
-        "button.artdeco-modal__dismiss",
-        ".artdeco-modal__dismiss"
-    ];
-
-    private static readonly string[] DiscardButton =
-    [
-        "button[data-test-dialog-primary-btn]",
-        "button[data-control-name=\"discard_application_confirm_btn\"]"
-    ];
-
-    public LinkedInApplicator(ILogger<LinkedInApplicator> logger, IMediator mediator)
+    public LinkedInApplicator(
+        IEnumerable<IFieldFiller> fieldFillers,
+        IEnumerable<IStepNavigator> stepNavigators,
+        IEnumerable<ISuccessDetector> successDetectors,
+        IHumanBehavior behavior,
+        ILogger<LinkedInApplicator> logger,
+        IMediator mediator)
     {
+        _fieldFillers = fieldFillers;
+        _stepNavigators = stepNavigators;
+        _successDetectors = successDetectors;
+        _behavior = behavior;
         _logger = logger;
-        _behavior = new HumanBehavior();
         _mediator = mediator;
     }
 
@@ -198,11 +142,22 @@ public sealed class LinkedInApplicator
 
     private async Task<ApplyResult?> HandleSubmitStepAsync(IPage page, JobListing job, List<FormField> fields)
     {
-        if (fields.Count != 0 || !await IsSubmitStepAsync(page))
+        if (fields.Count != 0)
+            return null;
+
+        var submitNav = _stepNavigators.FirstOrDefault(s => s is SubmitStepNavigator);
+        if (submitNav is null || !await submitNav.CanNavigateAsync(page))
             return null;
 
         _logger.LogInformation("[{Title}] Submit button found! Submitting...", job.Title);
-        await ClickSubmitAsync(page);
+
+        var result = await submitNav.NavigateAsync(page);
+        if (result == StepResult.Error)
+        {
+            _logger.LogWarning("[{Title}] ❌ Submit click failed", job.Title);
+            return new ApplyResult(false, "Submit click failed");
+        }
+
         await _behavior.DelayAsync(3000, 4000);
 
         if (await CheckSubmissionSuccessAsync(page))
@@ -222,7 +177,8 @@ public sealed class LinkedInApplicator
         {
             case StepResult.Submit:
                 _logger.LogInformation("[{Title}] 📤 On submit step", job.Title);
-                await ClickSubmitAsync(page);
+                var submitNav = _stepNavigators.First(s => s is SubmitStepNavigator);
+                await submitNav.NavigateAsync(page);
                 await _behavior.DelayAsync(3000, 4000);
                 if (await CheckSubmissionSuccessAsync(page))
                 {
@@ -243,22 +199,21 @@ public sealed class LinkedInApplicator
 
     private async Task<bool> OpenEasyApplyModalAsync(IPage page)
     {
-        var alreadyOpen = await WaitForAnySelectorAsync(page, ModalContainer, 1000);
+        var alreadyOpen = await page.WaitForAnySelectorAsync( LinkedInSelectors.ModalContainer, 1000);
         if (alreadyOpen is not null) return true;
 
-        var selector = await WaitForAnySelectorAsync(page, EasyApplyButton, 3000);
+        var selector = await page.WaitForAnySelectorAsync( LinkedInSelectors.EasyApplyButton, 3000);
         if (selector is null) return false;
 
         await _behavior.HumanClickAsync(page, selector);
         await _behavior.DelayAsync(1000, 2000);
 
-        var modalOpen = await WaitForAnySelectorAsync(page, ModalContainer, 3000);
+        var modalOpen = await page.WaitForAnySelectorAsync( LinkedInSelectors.ModalContainer, 3000);
         return modalOpen is not null;
     }
 
     private async Task<(List<FormField> Fields, string StepTitle)> ExtractFormFieldsAsync(IPage page)
     {
-        var fields = new List<FormField>();
         await _behavior.DelayAsync(1000, 1500);
 
         var formRoot = page.Locator(".jobs-easy-apply-modal, .artdeco-modal, [data-test-modal-id=\"easy-apply-modal\"]").First;
@@ -267,22 +222,19 @@ public sealed class LinkedInApplicator
 
         var stepTitle = await ExtractStepTitleAsync(page);
 
-        await ExtractTextInputsAsync(page, formRoot, fields);
-        await ExtractSelectsAsync(page, formRoot, fields);
-        await ExtractTextareasAsync(page, formRoot, fields);
-        await ExtractFileUploadAsync(page, fields);
+        var fields = new List<FormField>();
+        foreach (var filler in _fieldFillers)
+        {
+            var extracted = await filler.ExtractAsync(page, formRoot);
+            fields.AddRange(extracted);
+        }
 
         return (fields, stepTitle);
     }
 
     private async Task<string> ExtractStepTitleAsync(IPage page)
     {
-        string[] stepSelectors =
-        [
-            ".jobs-easy-apply-modal__content h3.t-16",
-            ".ph5 h3.t-16.t-bold",
-            ".artdeco-modal__content h3"
-        ];
+        var stepSelectors = LinkedInSelectors.StepTitleSelectors;
 
         foreach (var sel in stepSelectors)
         {
@@ -298,153 +250,6 @@ public sealed class LinkedInApplicator
             }
             catch { /* try next selector */ }
         }
-
-        return "";
-    }
-
-    private async Task ExtractTextInputsAsync(IPage page, ILocator formRoot, List<FormField> fields)
-    {
-        var textInputs = formRoot.Locator("input[type=\"text\"], input:not([type]), input.artdeco-text-input--input, [data-test-single-line-text-form-component] input");
-        var textCount = await textInputs.CountAsync();
-        for (var i = 0; i < textCount; i++)
-        {
-            var input = textInputs.Nth(i);
-            var label = await ExtractLabelAsync(page, input, "text");
-            if (string.IsNullOrEmpty(label)) continue;
-            var required = await input.GetAttributeAsync("required") is not null;
-            var value = await input.InputValueAsync();
-            var id = await input.GetAttributeAsync("id") ?? "";
-
-            // Verificar se é um campo typeahead (autocomplete)
-            var isTypeahead = false;
-            try
-            {
-                var parentClasses = await input.EvaluateAsync<string>(@"(el) => {
-                    const parent = el.closest('.search-basic-typeahead, .search-vertical-typeahead, [data-test-single-typeahead-entity-form-component]');
-                    return parent ? 'typeahead' : '';
-                }");
-                isTypeahead = parentClasses == "typeahead";
-            }
-            catch { }
-
-            fields.Add(new FormField(
-                isTypeahead ? FormFieldType.Typeahead : FormFieldType.Text,
-                label, id, required, value));
-        }
-    }
-
-    private async Task ExtractSelectsAsync(IPage page, ILocator formRoot, List<FormField> fields)
-    {
-        var selects = formRoot.Locator("select, [data-test-text-entity-list-form-component] select");
-        var selectCount = await selects.CountAsync();
-        for (var i = 0; i < selectCount; i++)
-        {
-            var sel = selects.Nth(i);
-            var label = await ExtractLabelAsync(page, sel, "select");
-            if (string.IsNullOrEmpty(label)) continue;
-            var required = await sel.GetAttributeAsync("required") is not null;
-            var value = await sel.InputValueAsync();
-            var id = await sel.GetAttributeAsync("id") ?? "";
-            var options = await sel.EvaluateAsync<string[]>(@"(el) => {
-                try {
-                    return Array.from(el.options)
-                        .map(o => o.textContent?.trim() || o.value?.trim() || '')
-                        .filter(v => {
-                            if (!v) return false;
-                            const lower = v.toLowerCase();
-                            return !lower.includes('selecionar') && !lower.includes('select')
-                                && !lower.includes('opção') && !lower.includes('opcao');
-                        });
-                } catch { return []; }
-            }");
-            fields.Add(new FormField(FormFieldType.Select, label, id, required, value, [.. options]));
-        }
-    }
-
-    private async Task ExtractTextareasAsync(IPage page, ILocator formRoot, List<FormField> fields)
-    {
-        var textareas = formRoot.Locator("textarea");
-        var taCount = await textareas.CountAsync();
-        for (var i = 0; i < taCount; i++)
-        {
-            var ta = textareas.Nth(i);
-            var label = await ExtractLabelAsync(page, ta, "textarea");
-            if (string.IsNullOrEmpty(label)) continue;
-            var required = await ta.GetAttributeAsync("required") is not null;
-            var value = await ta.InputValueAsync();
-            var id = await ta.GetAttributeAsync("id") ?? "";
-            fields.Add(new FormField(FormFieldType.Textarea, label, id, required, value));
-        }
-    }
-
-    private static async Task ExtractFileUploadAsync(IPage page, List<FormField> fields)
-    {
-        var fileBtn = page.Locator("input[type=\"file\"], .jobs-document-upload__upload-button").First;
-        var hasFile = await fileBtn.IsVisibleAsync();
-        if (hasFile)
-            fields.Add(new FormField(FormFieldType.File, "Resume", "", true));
-    }
-
-    private async Task<string> ExtractLabelAsync(IPage page, ILocator element, string type)
-    {
-        // Primary strategy: use element.evaluate() to find label via closest container
-        try
-        {
-            var labelText = await element.EvaluateAsync<string>(@"(el) => {
-                try {
-                    // Strategy 1: Find parent form-element container and look for label
-                    const formElement = el.closest('[data-test-form-element], .fb-dash-form-element, .artdeco-text-input, [data-test-text-entity-list-form-component]');
-                    if (formElement) {
-                        // For selects, try title element first
-                        const title = formElement.querySelector('[data-test-text-entity-list-form-title]');
-                        if (title) {
-                            const span = title.querySelector('span:not(.visually-hidden)');
-                            if (span && span.textContent.trim()) return span.textContent.trim();
-                            return title.textContent.trim();
-                        }
-                        const lbl = formElement.querySelector('label');
-                        if (lbl) {
-                            const span = lbl.querySelector('span:not(.visually-hidden)');
-                            if (span && span.textContent.trim()) return span.textContent.trim();
-                            const clone = lbl.cloneNode(true);
-                            clone.querySelectorAll('.visually-hidden, [aria-hidden=""true""]').forEach(s => s.remove());
-                            return (clone.textContent || '').trim();
-                        }
-                    }
-
-                    // Strategy 2: label by 'for' attribute
-                    if (el.id) {
-                        const byFor = document.querySelector('label[for=""' + el.id + '""]');
-                        if (byFor) {
-                            const span = byFor.querySelector('span:not(.visually-hidden)');
-                            if (span && span.textContent.trim()) return span.textContent.trim();
-                            const clone = byFor.cloneNode(true);
-                            clone.querySelectorAll('.visually-hidden, [aria-hidden=""true""]').forEach(s => s.remove());
-                            return (clone.textContent || '').trim();
-                        }
-                    }
-                    return '';
-                } catch { return ''; }
-            }");
-            if (!string.IsNullOrEmpty(labelText)) return labelText;
-        }
-        catch { /* try next fallback */ }
-
-        // Fallback: aria-label
-        try
-        {
-            var ariaLabel = await element.GetAttributeAsync("aria-label");
-            if (!string.IsNullOrEmpty(ariaLabel)) return ariaLabel;
-        }
-        catch { /* try next fallback */ }
-
-        // Fallback: placeholder
-        try
-        {
-            var placeholder = await element.GetAttributeAsync("placeholder");
-            if (!string.IsNullOrEmpty(placeholder)) return placeholder;
-        }
-        catch { /* try next fallback */ }
 
         return "";
     }
@@ -519,94 +324,15 @@ public sealed class LinkedInApplicator
 
     private async Task FillFieldValueAsync(IPage page, FormField field, string answer)
     {
-        var selector = string.IsNullOrEmpty(field.ElementId) ? "" : $"#{field.ElementId}";
-
-        switch (field.Type)
+        var filler = _fieldFillers.FirstOrDefault(f => f.FieldType == field.Type);
+        if (filler is not null)
         {
-            case FormFieldType.Text:
-            case FormFieldType.Textarea:
-                if (!string.IsNullOrEmpty(selector))
-                {
-                    await page.Locator(selector).ClickAsync();
-                    await _behavior.DelayAsync(100, 300);
-                    await page.Locator(selector).FillAsync(answer);
-                }
-                break;
-
-            case FormFieldType.Select:
-                if (!string.IsNullOrEmpty(selector))
-                {
-                    var bestOption = FindBestOption(answer, field.Options ?? []);
-                    if (bestOption is not null)
-                        await page.Locator(selector).SelectOptionAsync(new[] { bestOption });
-                    else
-                        await page.Locator(selector).SelectOptionAsync(new[] { answer });
-                }
-                break;
-
-            case FormFieldType.Radio:
-                if (!string.IsNullOrEmpty(selector))
-                {
-                    var radios = page.Locator(selector);
-                    var count = await radios.CountAsync();
-                    for (var i = 0; i < count; i++)
-                    {
-                        var radio = radios.Nth(i);
-                        var label = await radio.EvaluateAsync<string>("(el) => el.closest('label')?.textContent?.trim() || ''");
-                        if (label.Contains(answer, StringComparison.OrdinalIgnoreCase))
-                        {
-                            await radio.CheckAsync();
-                            break;
-                        }
-                    }
-                }
-                break;
-
-            case FormFieldType.Checkbox:
-                if (answer.Equals("Yes", StringComparison.OrdinalIgnoreCase) ||
-                    answer.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-                    answer == "1")
-                {
-                    if (!string.IsNullOrEmpty(selector))
-                        await page.Locator(selector).CheckAsync();
-                }
-                break;
-
-            case FormFieldType.Typeahead:
-                if (!string.IsNullOrEmpty(selector))
-                {
-                    await page.Locator(selector).ClickAsync();
-                    await _behavior.DelayAsync(300, 500);
-                    await page.Locator(selector).FillAsync(string.Empty);
-                    await _behavior.DelayAsync(200, 400);
-                    await page.Locator(selector).PressSequentiallyAsync(answer, new() { Delay = 50 });
-                    await _behavior.DelayAsync(800, 1200);
-                    await page.Locator(selector).PressAsync("ArrowDown");
-                    await _behavior.DelayAsync(100, 200);
-                    await page.Locator(selector).PressAsync("Enter");
-                    await _behavior.DelayAsync(300, 500);
-                    await page.Locator(selector).PressAsync("Tab");
-                }
-                break;
+            await filler.FillAsync(page, field, answer);
         }
-    }
-
-    private static string? FindBestOption(string answer, List<string>? options)
-    {
-        if (options is null || options.Count == 0) return null;
-
-        var lower = answer.ToLowerInvariant();
-
-        var exact = options.FirstOrDefault(o => o.Equals(answer, StringComparison.OrdinalIgnoreCase));
-        if (exact is not null) return exact;
-
-        var contains = options.FirstOrDefault(o =>
-            o.Contains(lower, StringComparison.OrdinalIgnoreCase) ||
-            lower.Contains(o, StringComparison.OrdinalIgnoreCase));
-        if (contains is not null) return contains;
-
-        var firstWord = lower.Split(' ')[0];
-        return options.FirstOrDefault(o => o.StartsWith(firstWord, StringComparison.OrdinalIgnoreCase));
+        else
+        {
+            _logger.LogWarning("No filler found for field type: {Type}", field.Type);
+        }
     }
 
     private async Task UploadResumeAsync(IPage page, string resumePath)
@@ -629,205 +355,40 @@ public sealed class LinkedInApplicator
 
     private async Task<StepResult> AdvanceStepAsync(IPage page)
     {
-        var nextSel = await WaitForAnySelectorAsync(page, NextButton, 2000);
-        if (nextSel is not null)
+        foreach (var navigator in _stepNavigators)
         {
-            await _behavior.HumanClickAsync(page, nextSel);
-            await _behavior.DelayAsync(1500, 2500);
-
-            if (await GetValidationErrorAsync(page) is not null) return StepResult.Error;
-            return StepResult.Next;
+            if (await navigator.CanNavigateAsync(page))
+                return await navigator.NavigateAsync(page);
         }
-
-        var reviewSel = await WaitForAnySelectorAsync(page, ReviewButton, 1500);
-        if (reviewSel is not null)
-        {
-            await _behavior.HumanClickAsync(page, reviewSel);
-            await _behavior.DelayAsync(1500, 2500);
-            return StepResult.Review;
-        }
-
-        var submitSel = await WaitForAnySelectorAsync(page, SubmitButton, 1500);
-        if (submitSel is not null)
-            return StepResult.Submit;
-
         return StepResult.Error;
-    }
-
-    private async Task<bool> IsSubmitStepAsync(IPage page)
-    {
-        var modalSel = await WaitForAnySelectorAsync(page, ModalContainer, 500);
-        if (modalSel is null) return false;
-        var submitSel = await WaitForAnySelectorAsync(page, SubmitButton, 1000);
-        return submitSel is not null;
-    }
-
-    private async Task ClickSubmitAsync(IPage page)
-    {
-        var submitSel = await WaitForAnySelectorAsync(page, SubmitButton, 3000);
-        if (submitSel is null)
-        {
-            _logger.LogWarning("Submit button not found");
-            return;
-        }
-
-        try { await _behavior.HumanClickAsync(page, submitSel); }
-        catch { /* try next click method */
-            try { await page.Locator(submitSel).ClickAsync(new() { Force = true }); }
-            catch { /* try next click method */
-                try { await page.EvaluateAsync(@"(sel) => document.querySelector(sel)?.click()", submitSel); }
-                catch { /* try next click method */ }
-            }
-        }
     }
 
     private async Task<bool> CheckSubmissionSuccessAsync(IPage page)
     {
-        var successPhrases = new[]
-        {
-            "application was sent", "applied successfully", "your application",
-            "application submitted", "candidatura enviada", "inscrição concluída",
-            "candidatura concluída", "enviada com sucesso", "success"
-        };
-
         await _behavior.DelayAsync(2000, 3000);
 
-        if (await CheckSuccessInContainersAsync(page, successPhrases)) return true;
-        if (await CheckSuccessInBodyAsync(page, successPhrases)) return true;
-        if (await CheckSuccessByModalDismissedAsync(page)) return true;
-        if (await CheckSuccessPostApplyModalAsync(page)) return true;
-
-        return false;
-    }
-
-    private async Task<bool> CheckSuccessInContainersAsync(IPage page, string[] successPhrases)
-    {
-        var containers = new[] { ".jobs-easy-apply-modal", ".artdeco-modal", ".jpac-modal" };
-        foreach (var container in containers)
+        foreach (var detector in _successDetectors)
         {
-            try
+            if (await detector.DetectAsync(page))
             {
-                var text = await page.Locator(container).First.InnerTextAsync(new() { Timeout = 1000 });
-                if (successPhrases.Any(p => text.Contains(p, StringComparison.OrdinalIgnoreCase)))
-                {
-                    _logger.LogInformation("[Success] Confirmation text found in: {Container}", container);
-                    await DismissSuccessModalAsync(page);
-                    return true;
-                }
-            }
-            catch { /* try next container */ }
-        }
-        return false;
-    }
-
-    private async Task<bool> CheckSuccessInBodyAsync(IPage page, string[] successPhrases)
-    {
-        try
-        {
-            var bodyText = await page.Locator("body").InnerTextAsync(new() { Timeout = 1000 });
-            if (successPhrases.Any(p => bodyText.Contains(p, StringComparison.OrdinalIgnoreCase)))
-            {
-                _logger.LogInformation("[Success] Text found in body");
+                _logger.LogInformation("[Success] Detected by {Detector}", detector.GetType().Name);
                 return true;
             }
         }
-        catch { /* try next approach */ }
         return false;
-    }
-
-    private async Task<bool> CheckSuccessByModalDismissedAsync(IPage page)
-    {
-        try
-        {
-            var modalOpen = await WaitForAnySelectorAsync(page, ModalContainer, 2000);
-            if (modalOpen is null)
-            {
-                _logger.LogInformation("[Success] Modal closed, job page visible");
-                return true;
-            }
-        }
-        catch { /* try next approach */ }
-        return false;
-    }
-
-    private async Task<bool> CheckSuccessPostApplyModalAsync(IPage page)
-    {
-        try
-        {
-            var postApplyModal = page.Locator("div[aria-labelledby=\"post-apply-modal\"], .jpac-modal-header").First;
-            await postApplyModal.WaitForAsync(new() { Timeout = 3000 });
-            var isVisible = await postApplyModal.IsVisibleAsync();
-            if (isVisible)
-            {
-                _logger.LogInformation("[Success] Post-apply confirmation modal detected");
-
-                // Click "Concluído" / "Done" button to close
-                try
-                {
-                    var doneBtn = page.Locator("#post-apply-modal + .artdeco-modal__actionbar button.artdeco-button--primary, .artdeco-modal__actionbar button.artdeco-button--primary").First;
-                    await doneBtn.ClickAsync(new() { Timeout = 2000 });
-                    await _behavior.DelayAsync(500, 1000);
-                }
-                catch { /* try next button */ }
-
-                return true;
-            }
-        }
-        catch { /* try next approach */ }
-        return false;
-    }
-
-    private async Task DismissSuccessModalAsync(IPage page)
-    {
-        var doneSelectors = new[]
-        {
-            "button[aria-label*=\"Concluir\"]",
-            "button[aria-label*=\"Done\"]",
-            "button[aria-label*=\"Dismiss\"]",
-            "button.artdeco-modal__dismiss"
-        };
-
-        var doneSel = await WaitForAnySelectorAsync(page, doneSelectors, 2000);
-        if (doneSel is not null)
-        {
-            await _behavior.HumanClickAsync(page, doneSel);
-            await _behavior.DelayAsync(500, 1000);
-        }
-    }
-
-    private async Task<string?> GetValidationErrorAsync(IPage page)
-    {
-        var errorSelectors = new[]
-        {
-            ".artdeco-inline-feedback--error",
-            ".fb-form-element__error-text",
-            "[data-test-form-element-error-text]"
-        };
-
-        foreach (var sel in errorSelectors)
-        {
-            try
-            {
-                var el = page.Locator(sel).First;
-                if (await el.IsVisibleAsync())
-                    return await el.InnerTextAsync();
-            }
-            catch { /* try next selector */ }
-        }
-        return null;
     }
 
     private async Task CloseModalAsync(IPage page)
     {
         try
         {
-            var dismissSel = await WaitForAnySelectorAsync(page, DismissButton, 2000);
+            var dismissSel = await page.WaitForAnySelectorAsync(LinkedInSelectors.DismissButton, 2000);
             if (dismissSel is not null)
             {
                 await _behavior.HumanClickAsync(page, dismissSel);
                 await _behavior.DelayAsync(500, 1000);
 
-                var discardSel = await WaitForAnySelectorAsync(page, DiscardButton, 2000);
+                var discardSel = await page.WaitForAnySelectorAsync(LinkedInSelectors.DiscardButton, 2000);
                 if (discardSel is not null)
                     await _behavior.HumanClickAsync(page, discardSel);
             }
@@ -835,31 +396,4 @@ public sealed class LinkedInApplicator
         catch { /* close modal, ignore error */ }
     }
 
-    private async Task<string?> WaitForAnySelectorAsync(IPage page, string[] selectors, int timeoutMs)
-    {
-        foreach (var sel in selectors)
-        {
-            try
-            {
-                var locator = page.Locator(sel).First;
-                await locator.WaitForAsync(new() { Timeout = timeoutMs });
-                if (await locator.IsVisibleAsync())
-                    return sel;
-            }
-            catch { /* try next selector */ }
-        }
-        return null;
-    }
 }
-
-public sealed record FormField(FormFieldType Type, string Label, string ElementId, bool Required, string? CurrentValue = null, List<string>? Options = null);
-
-public enum FormFieldType { Text, Textarea, Select, Radio, Checkbox, File, Typeahead }
-
-public enum StepResult { Next, Review, Submit, Error }
-
-public sealed record ApplyResult(
-    bool Success,
-    string? ErrorMessage = null,
-    bool NeedsManualIntervention = false,
-    Dictionary<string, string>? AnswersUsed = null);
