@@ -4,6 +4,8 @@ using AutoApplicator.Infrastructure.Automation;
 using AutoApplicator.Infrastructure.Automation.Abstractions;
 using AutoApplicator.Infrastructure.Automation.Platforms;
 using AutoApplicator.Infrastructure.Automation.Platforms.Gupy;
+using AutoApplicator.Infrastructure.Automation.Platforms.Gupy.FieldFillers;
+using AutoApplicator.Infrastructure.Automation.Platforms.Gupy.SuccessDetectors;
 using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn;
 using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn.DescriptionExtractors;
 using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn.FieldFillers;
@@ -26,18 +28,29 @@ public static class DependencyInjection
         services.AddScoped<IProfileRepository, ProfileRepository>();
         services.AddScoped<IJobRepository, JobRepository>();
         services.AddScoped<IQuestionRepository, QuestionRepository>();
+        services.AddSingleton<NotificationService>();
+        services.AddSingleton<INotificationService>(sp => sp.GetRequiredService<NotificationService>());
         services.AddSingleton<PlaywrightService>();
         services.AddSingleton<IPlaywrightService>(sp => sp.GetRequiredService<PlaywrightService>());
+        services.AddSingleton<BrowserLoginService>();
+        services.AddSingleton<JobSearchService>();
+        services.AddSingleton<JobApplyService>();
+        services.AddSingleton<AutomationOrchestrator>();
         services.AddSingleton<AutomationService>();
-        services.AddSingleton<INotificationService>(sp => sp.GetRequiredService<NotificationService>());
-        services.AddSingleton<NotificationService>();
         services.AddSingleton<IAutomationStateService>(sp => sp.GetRequiredService<AutomationService>());
         services.AddSingleton<PlatformAdapterFactory>();
         services.AddScoped<LinkedInApplicator>();
+        services.AddScoped<GupyApplicator>();
+        services.AddScoped<IJobApplicator, LinkedInApplicator>();
+        services.AddScoped<IJobApplicator, GupyApplicator>();
         services.AddSingleton<ExceptionHandlerService>();
         services.AddSingleton<LinkedInDedupService>();
         services.AddSingleton<IHumanBehavior, HumanBehavior>();
         services.AddScoped<LinkedInPaginator>();
+
+        // Gupy Field Fillers
+        services.AddScoped<IFieldFiller, GupyRadioFieldFiller>();
+        services.AddScoped<IFieldFiller, GupyTextareaFieldFiller>();
 
         // LinkedInExtractor
         services.AddScoped<LinkedInExtractor>();
@@ -45,8 +58,14 @@ public static class DependencyInjection
         // GupyExtractor
         services.AddScoped<GupyExtractor>();
 
+        // GupyPaginator
+        services.AddScoped<GupyPaginator>();
+
         // GupyAdapter
         services.AddScoped<GupyAdapter>();
+
+        // Gupy Success Detectors
+        services.AddScoped<ISuccessDetector, GupyPostApplyDetector>();
 
         // LinkedInAdapter
         services.AddScoped<LinkedInAdapter>();
@@ -83,5 +102,18 @@ public static class DependencyInjection
     {
         using var context = serviceProvider.GetRequiredService<AppDbContext>();
         context.Database.EnsureCreated();
+
+        // Apply manual migrations for schema changes that EnsureCreated does not handle
+        // on existing databases (EnsureCreated only creates the DB if it doesn't exist).
+        try
+        {
+            // Add Group column to CollectedQuestions if it doesn't exist
+            context.Database.ExecuteSqlRaw(
+                "ALTER TABLE CollectedQuestions ADD COLUMN \"Group\" TEXT NULL;");
+        }
+        catch
+        {
+            // Column already exists — ignore
+        }
     }
 }

@@ -1,6 +1,8 @@
+using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
 using AutoApplicator.Infrastructure.Automation.Models;
+using AutoApplicator.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 
@@ -46,11 +48,12 @@ public sealed class IndeedAdapter : IPlatformAdapter
         _logger = logger;
     }
 
-    public async Task<AuthCheckResult> IsAuthenticatedAsync(IPage page)
+    public async Task<AuthCheckResult> IsAuthenticatedAsync(IBrowserPage page)
     {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         try
         {
-            var modalLocator = page
+            var modalLocator = innerPage
                 .Locator("#privacy-gdpr, .fc-consent-root, [class*=\"cookie\"]")
                 .First;
             await modalLocator.WaitForAsync(new() { Timeout = 2000 });
@@ -58,7 +61,7 @@ public sealed class IndeedAdapter : IPlatformAdapter
 
             if (hasBlockingModal)
             {
-                var dismissBtn = page.Locator("button:has-text(\"Accept\"), button:has-text(\"Accept all\"), button:has-text(\"Permitir\")").First;
+                var dismissBtn = innerPage.Locator("button:has-text(\"Accept\"), button:has-text(\"Accept all\"), button:has-text(\"Permitir\")").First;
                 await dismissBtn.WaitForAsync(new() { Timeout = 1000 });
                 var dismissVisible = await dismissBtn.IsVisibleAsync();
                 if (dismissVisible)
@@ -69,6 +72,19 @@ public sealed class IndeedAdapter : IPlatformAdapter
             }
         }
         catch { /* dismiss cookie modal, ignore error */ }
+
+        // Indeed allows browsing jobs without authentication, but may redirect
+        // to login page (secure.indeed.com/auth) when the apply flow requires it.
+        var currentUrl = innerPage.Url;
+        if (currentUrl.Contains("secure.indeed.com/auth") || currentUrl.Contains("/auth"))
+        {
+            return new AuthCheckResult
+            {
+                IsAuthenticated = false,
+                LoginUrl = "https://secure.indeed.com/auth",
+                Message = "Indeed: please log in first"
+            };
+        }
 
         return new AuthCheckResult { IsAuthenticated = true };
     }
@@ -134,18 +150,20 @@ public sealed class IndeedAdapter : IPlatformAdapter
         return $"{_baseUrl}/jobs?{paramString}";
     }
 
-    public async Task<List<ExtractedJob>> ExtractListingsAsync(IPage page)
+    public async Task<List<ExtractedJob>> ExtractListingsAsync(IBrowserPage page)
     {
-        return await _extractor.ExtractJobCardsAsync(page);
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+        return await _extractor.ExtractJobCardsAsync(innerPage);
     }
 
-    public async Task<bool> HasNextPageAsync(IPage page)
+    public async Task<bool> HasNextPageAsync(IBrowserPage page)
     {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         foreach (var sel in PaginationSelectors)
         {
             try
             {
-                var visible = await page.Locator(sel).First.IsVisibleAsync();
+                var visible = await innerPage.Locator(sel).First.IsVisibleAsync();
                 if (visible) return true;
             }
             catch { /* try next */ }
@@ -153,17 +171,18 @@ public sealed class IndeedAdapter : IPlatformAdapter
         return false;
     }
 
-    public async Task GoToNextPageAsync(IPage page)
+    public async Task GoToNextPageAsync(IBrowserPage page)
     {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         foreach (var sel in PaginationSelectors)
         {
             try
             {
-                var visible = await page.Locator(sel).First.IsVisibleAsync();
+                var visible = await innerPage.Locator(sel).First.IsVisibleAsync();
                 if (visible)
                 {
-                    await _behavior.HumanClickAsync(page, sel);
-                    await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                    await _behavior.HumanClickAsync(innerPage, sel);
+                    await innerPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
                     await _behavior.DelayAsync(2000, 4000);
                     return;
                 }
@@ -173,21 +192,23 @@ public sealed class IndeedAdapter : IPlatformAdapter
         _logger.LogWarning("Could not find next page button on Indeed");
     }
 
-    public async Task NavigateToPageAsync(IPage page, SearchProfile profile, int pageNum)
+    public async Task NavigateToPageAsync(IBrowserPage page, SearchProfile profile, int pageNum)
     {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         var url = BuildSearchUrl(profile, pageNum);
-        await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await innerPage.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
         await Task.Delay(2000);
     }
 
-    public async Task<JobDetail> ExtractJobDetailsAsync(IPage page, string url)
+    public async Task<JobDetail> ExtractJobDetailsAsync(IBrowserPage page, string url)
     {
-        if (!page.Url.Contains(url) && !string.IsNullOrEmpty(url))
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+        if (!innerPage.Url.Contains(url) && !string.IsNullOrEmpty(url))
         {
-            await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+            await innerPage.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
             await _behavior.DelayAsync(1000, 2000);
         }
 
-        return await _extractor.ExtractJobDetailsAsync(page);
+        return await _extractor.ExtractJobDetailsAsync(innerPage);
     }
 }

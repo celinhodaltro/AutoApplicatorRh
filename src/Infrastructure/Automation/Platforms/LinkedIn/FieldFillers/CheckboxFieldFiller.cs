@@ -87,7 +87,7 @@ public sealed class CheckboxFieldFiller : IFieldFiller
             {
                 if (!string.IsNullOrEmpty(field.ElementId))
                 {
-                    await page.Locator($"#{field.ElementId}").CheckAsync();
+                    await page.Locator($"#{CssSelectorHelper.EscapeCssId(field.ElementId)}").CheckAsync();
                     _logger.LogInformation("CheckboxFieldFiller: Checked '{Label}'", field.Label);
                 }
                 else

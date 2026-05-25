@@ -1,6 +1,9 @@
+using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
+using AutoApplicator.Infrastructure.Automation.Abstractions;
 using AutoApplicator.Infrastructure.Automation.Models;
+using AutoApplicator.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 
@@ -12,106 +15,130 @@ public sealed class GupyAdapter : IPlatformAdapter
     public string BaseUrl => "https://portal.gupy.io";
 
     private readonly GupyExtractor _extractor;
-    private readonly HumanBehavior _behavior;
+    private readonly IHumanBehavior _behavior;
     private readonly ILogger<GupyAdapter> _logger;
 
-    private static readonly string[] JobCardSelectors =
-    [
-        "[data-testid=\"job-card\"]",
-        ".job-card",
-        "a[class*=\"job\"]",
-        "div[class*=\"job-card\"]"
-    ];
-
-    private static readonly string[] CardTitleSelectors =
-    [
-        "[data-testid=\"job-card-title\"]",
-        "h2",
-        "h3",
-        "a[class*=\"job\"] h3",
-        "a[class*=\"job\"] h2"
-    ];
-
-    private static readonly string[] CardCompanySelectors =
-    [
-        "[data-testid=\"job-card-company\"]",
-        "[class*=\"company\"]",
-        "span[class*=\"company\"]"
-    ];
-
-    private static readonly string[] CardLocationSelectors =
-    [
-        "[data-testid=\"job-card-location\"]",
-        "[class*=\"location\"]",
-        "[class*=\"place\"]"
-    ];
-
-    public GupyAdapter(ILogger<GupyAdapter> logger, GupyExtractor extractor)
+    public GupyAdapter(
+        ILogger<GupyAdapter> logger,
+        GupyExtractor extractor,
+        IHumanBehavior behavior)
     {
         _extractor = extractor;
-        _behavior = new HumanBehavior();
+        _behavior = behavior;
         _logger = logger;
     }
 
-    public Task<AuthCheckResult> IsAuthenticatedAsync(IPage page)
+    public async Task<AuthCheckResult> IsAuthenticatedAsync(IBrowserPage page)
     {
-        return Task.FromResult(new AuthCheckResult { IsAuthenticated = true });
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+        try
+        {
+            // Use QuerySelectorAsync which checks DOM presence, NOT visibility
+            var loginBtn = await innerPage.QuerySelectorAsync("button:has-text(\"Entrar\"), button[data-testid=\"header-login-button\"], button#button-login");
+
+            if (loginBtn is not null)
+            {
+                return new AuthCheckResult
+                {
+                    IsAuthenticated = false,
+                    LoginUrl = "https://login.gupy.io/candidates/signin",
+                    Message = "Gupy: please log in first"
+                };
+            }
+        }
+        catch { /* element not found in DOM = user is logged in */ }
+
+        return new AuthCheckResult { IsAuthenticated = true };
     }
 
     public string BuildSearchUrl(SearchProfile profile, int pageNum = 1)
     {
         var keywords = string.Join(" ", profile.Keywords);
-        var query = Uri.EscapeDataString(keywords);
-        var page = pageNum > 1 ? $"&page={pageNum}" : string.Empty;
-        return $"{BaseUrl}/job-search?term={query}{page}";
+        return GupySelectors.BuildSearchUrl(keywords, pageNum);
     }
 
-    public async Task<List<ExtractedJob>> ExtractListingsAsync(IPage page)
+    public async Task<List<ExtractedJob>> ExtractListingsAsync(IBrowserPage page)
     {
-        return await _extractor.ExtractJobCardsAsync(page);
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+        return await _extractor.ExtractJobCardsAsync(innerPage);
     }
 
-    public Task<bool> HasNextPageAsync(IPage page)
+    public async Task<bool> HasNextPageAsync(IBrowserPage page)
     {
-        return Task.FromResult(false);
-    }
-
-    public Task GoToNextPageAsync(IPage page)
-    {
-        return Task.CompletedTask;
-    }
-
-    public async Task NavigateToPageAsync(IPage page, SearchProfile profile, int pageNum)
-    {
-        var url = $"{BaseUrl}/job-search?term={Uri.EscapeDataString(string.Join(" ", profile.Keywords))}&page={pageNum}";
-        await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-        await Task.Delay(2000);
-    }
-
-    public async Task<JobDetail> ExtractJobDetailsAsync(IPage page, string url)
-    {
-        if (!page.Url.Contains(url) && !string.IsNullOrEmpty(url))
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+        try
         {
-            await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+            var nextBtn = await innerPage.QuerySelectorAsync(GupySelectors.NextPageButton);
+            if (nextBtn is not null)
+            {
+                var isDisabled = await nextBtn.GetAttributeAsync("aria-disabled");
+                if (isDisabled == "true") return false;
+
+                var classAttr = await nextBtn.GetAttributeAsync("class");
+                if (classAttr is not null && classAttr.Contains("disabled", StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                return true;
+            }
+
+            // Fallback: if we have job cards, assume there might be more pages
+            var jobCards = await innerPage.QuerySelectorAllAsync(GupySelectors.JobCardSelector);
+            if (jobCards.Count >= 20)
+            {
+                // Check if there's a visible pagination element
+                var pagination = await innerPage.QuerySelectorAsync("[aria-label=\"Página\"]");
+                return pagination is not null;
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to check for next Gupy page");
+            return false;
+        }
+    }
+
+    public async Task GoToNextPageAsync(IBrowserPage page)
+    {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+        try
+        {
+            var nextBtn = await innerPage.QuerySelectorAsync(GupySelectors.NextPageButton);
+            if (nextBtn is not null)
+            {
+                await nextBtn.ClickAsync();
+                await innerPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                await _behavior.DelayAsync(2000, 3000);
+                return;
+            }
+
+            _logger.LogWarning("Next page button not found");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to go to next Gupy page");
+        }
+    }
+
+    public async Task NavigateToPageAsync(IBrowserPage page, SearchProfile profile, int pageNum)
+    {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+        var keywords = string.Join(" ", profile.Keywords);
+        var url = GupySelectors.BuildSearchUrl(keywords, pageNum);
+        await innerPage.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await _behavior.DelayAsync(2000, 3000);
+    }
+
+    public async Task<JobDetail> ExtractJobDetailsAsync(IBrowserPage page, string url)
+    {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+        if (!innerPage.Url.Contains(url) && !string.IsNullOrEmpty(url))
+        {
+            await innerPage.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
             await _behavior.DelayAsync(1000, 2000);
         }
 
-        return await _extractor.ExtractJobDetailsAsync(page);
-    }
-
-    private static async Task<string?> GetInnerTextAsync(IElementHandle parent, string[] selectors)
-    {
-        foreach (var sel in selectors)
-        {
-            try
-            {
-                var el = await parent.QuerySelectorAsync(sel);
-                if (el is null) continue;
-                var text = (await el.InnerTextAsync())?.Trim();
-                if (!string.IsNullOrEmpty(text)) return text;
-            }
-            catch { /* try next */ }
-        }
-        return null;
+        return await _extractor.ExtractJobDetailsAsync(innerPage);
     }
 }

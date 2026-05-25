@@ -83,6 +83,19 @@ public partial class Settings
         catch { /* Failed to open browser */ }
     }
 
+    private async Task OpenLoginInBrowser(PlatformType platform)
+    {
+        var url = platform switch
+        {
+            PlatformType.Gupy => "https://portal.gupy.io/login",
+            PlatformType.Indeed => "https://secure.indeed.com/auth",
+            PlatformType.LinkedIn => "https://www.linkedin.com/login",
+            _ => "https://www.linkedin.com/login"
+        };
+
+        await BrowserLogin.OpenLoginPageAsync(url);
+    }
+
     private void OpenLogsFolder()
     {
         var logDir = Path.Combine(FileSystem.AppDataDirectory, "Logs");

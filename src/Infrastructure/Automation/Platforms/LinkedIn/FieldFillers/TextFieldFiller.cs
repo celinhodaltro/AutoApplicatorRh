@@ -83,9 +83,10 @@ public sealed class TextFieldFiller : IFieldFiller
     {
         try
         {
+            var escapedId = CssSelectorHelper.EscapeCssId(field.ElementId);
             var selector = string.IsNullOrEmpty(field.ElementId)
                 ? throw new InvalidOperationException("ElementId is empty, cannot fill")
-                : $"#{field.ElementId}";
+                : $"#{escapedId}";
 
             var locator = page.Locator(selector);
             await locator.ClickAsync();

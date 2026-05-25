@@ -1,8 +1,5 @@
-using AutoApplicator.Application.Commands.Jobs;
-using AutoApplicator.Application.Queries.Jobs;
-using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
-using MediatR;
+using AutoApplicator.Presentation.Components.ViewModels;
 using Microsoft.AspNetCore.Components;
 using Radzen;
 
@@ -10,45 +7,64 @@ namespace AutoApplicator.App.Components.Pages.Jobs;
 
 public partial class JobList
 {
-    [Inject] private IMediator Mediator { get; set; } = default!;
+    [Inject] private JobListViewModel ViewModel { get; set; } = default!;
     [Inject] private NavigationManager Navigation { get; set; } = default!;
 
-    private List<JobListing> _allJobs = [];
-    private List<JobListing> _filteredJobs = [];
     private HashSet<Guid> _selectedIds = [];
-    private JobStatus? _statusFilter;
     private bool _selectAll;
 
-    protected override async Task OnInitializedAsync() => await LoadJobs();
-
-    private async Task LoadJobs()
+    protected override async Task OnInitializedAsync()
     {
-        _allJobs = await Mediator.Send(new GetJobsQuery(Status: null, Platform: null, Page: 1, PageSize: 200));
-        _selectAll = false;
-        _selectedIds.Clear();
-        ApplyFilter();
+        await ViewModel.LoadJobsAsync();
     }
 
-    private void FilterByStatus(JobStatus? status)
+    private async Task FilterByStatus(string? status)
     {
-        _statusFilter = status;
-        _selectAll = false;
+        ViewModel.SelectedStatus = status;
+        await ViewModel.LoadJobsAsync();
         _selectedIds.Clear();
-        ApplyFilter();
+        _selectAll = false;
     }
 
-    private void ApplyFilter()
+    private async Task ApproveSelected()
     {
-        _filteredJobs = _statusFilter.HasValue
-            ? _allJobs.Where(j => j.Status == _statusFilter.Value).ToList()
-            : [.. _allJobs];
+        foreach (var id in _selectedIds.ToList())
+            await ViewModel.ApproveJobAsync(id);
+        _selectedIds.Clear();
+        _selectAll = false;
+    }
+
+    private async Task RejectSelected()
+    {
+        foreach (var id in _selectedIds.ToList())
+            await ViewModel.RejectJobAsync(id);
+        _selectedIds.Clear();
+        _selectAll = false;
+    }
+
+    private async Task DeleteSelected()
+    {
+        foreach (var id in _selectedIds.ToList())
+            await ViewModel.DeleteJobAsync(id);
+        _selectedIds.Clear();
+        _selectAll = false;
+    }
+
+    private async Task ApproveSingle(Guid id)
+    {
+        await ViewModel.ApproveJobAsync(id);
+    }
+
+    private async Task RejectSingle(Guid id)
+    {
+        await ViewModel.RejectJobAsync(id);
     }
 
     private void ToggleSelection(Guid id, bool isSelected)
     {
         if (isSelected) _selectedIds.Add(id);
         else _selectedIds.Remove(id);
-        _selectAll = _selectedIds.Count == _filteredJobs.Count && _filteredJobs.Count > 0;
+        _selectAll = _selectedIds.Count == ViewModel.Jobs.Count && ViewModel.Jobs.Count > 0;
     }
 
     private void ToggleSelectAll(ChangeEventArgs e)
@@ -57,40 +73,9 @@ public partial class JobList
         _selectAll = isChecked;
 
         if (isChecked)
-            _selectedIds = [.. _filteredJobs.Select(j => j.Id)];
+            _selectedIds = [.. ViewModel.Jobs.Select(j => j.Id)];
         else
             _selectedIds.Clear();
     }
 
-    private async Task BatchApprove()
-    {
-        await Mediator.Send(new BatchApproveJobsCommand(_selectedIds.ToList()));
-        await LoadJobs();
-    }
-
-    private async Task BatchReject()
-    {
-        foreach (var id in _selectedIds.ToList())
-            await Mediator.Send(new RejectJobCommand(id));
-        await LoadJobs();
-    }
-
-    private async Task BatchDelete()
-    {
-        foreach (var id in _selectedIds.ToList())
-            await Mediator.Send(new DeleteJobCommand(id));
-        await LoadJobs();
-    }
-
-    private async Task ApproveSingle(JobListing job)
-    {
-        await Mediator.Send(new ApproveJobCommand(job.Id));
-        await LoadJobs();
-    }
-
-    private async Task RejectSingle(JobListing job)
-    {
-        await Mediator.Send(new RejectJobCommand(job.Id));
-        await LoadJobs();
-    }
 }

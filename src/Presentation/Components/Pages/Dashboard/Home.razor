@@ -9,44 +9,50 @@
     </RadzenText>
 </div>
 
-@if (_loading)
+@if (ViewModel.IsLoading)
 {
     <LoadingState />
 }
+else if (ViewModel.Data is null)
+{
+    <EmptyState Message="Unable to load dashboard data." />
+}
 else
 {
+    var data = ViewModel.Data;
+
     <div class="kpi-grid">
         <div class="kpi-card purple">
             <div class="kpi-header">
                 <RadzenText TextStyle="TextStyle.Body2" class="kpi-label">Total Profiles</RadzenText>
                 <RadzenIcon Icon="account_circle" style="font-size: 24px;" />
             </div>
-            <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@_totalProfiles</RadzenText>
-            <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@_activeProfiles active</RadzenText>
+            <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@data.TotalProfiles</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@data.ActiveProfiles active</RadzenText>
         </div>
         <div class="kpi-card pink">
             <div class="kpi-header">
                 <RadzenText TextStyle="TextStyle.Body2" class="kpi-label">Total Jobs</RadzenText>
                 <RadzenIcon Icon="work" style="font-size: 24px;" />
             </div>
-            <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@_totalJobs</RadzenText>
-            <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@_pendingReview pending review</RadzenText>
+            <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@data.TotalJobs</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@data.PendingReview pending review</RadzenText>
         </div>
         <div class="kpi-card blue">
             <div class="kpi-header">
                 <RadzenText TextStyle="TextStyle.Body2" class="kpi-label">Applied</RadzenText>
                 <RadzenIcon Icon="check_circle" style="font-size: 24px;" />
             </div>
-            <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@_appliedJobs</RadzenText>
-            <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@_approvedJobs approved to apply</RadzenText>
+            <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@data.AppliedJobs</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@data.ApprovedJobs approved to apply</RadzenText>
         </div>
         <div class="kpi-card green">
             <div class="kpi-header">
                 <RadzenText TextStyle="TextStyle.Body2" class="kpi-label">Questions</RadzenText>
                 <RadzenIcon Icon="help" style="font-size: 24px;" />
             </div>
-            <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@_totalQuestions</RadzenText>
-            <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@_unansweredQuestions unanswered</RadzenText>
+            <RadzenText TextStyle="TextStyle.H2" class="kpi-value">@data.TotalQuestions</RadzenText>
+            <RadzenText TextStyle="TextStyle.Caption" class="kpi-sub">@data.UnansweredQuestions unanswered</RadzenText>
         </div>
     </div>
 
@@ -54,13 +60,13 @@ else
     <div class="pipeline-fullwidth">
         <RadzenText TextStyle="TextStyle.H6" class="pipeline-title">📊 Job Pipeline</RadzenText>
         <div class="pipeline-track">
-            @foreach (var stage in _pipelineStages)
+            @foreach (var stage in data.PipelineStages)
             {
-                <div class="pipeline-stage @stage.Status.ToString().ToLower()">
+                <div class="pipeline-stage @stage.Status.ToLower()">
                     <div class="stage-count">@stage.Count</div>
                     <div class="stage-label">@stage.Status</div>
                 </div>
-                @if (stage != _pipelineStages.Last())
+                @if (stage != data.PipelineStages.Last())
                 {
                     <div class="pipeline-arrow">→</div>
                 }
@@ -81,7 +87,7 @@ else
         <div class="chart-card">
             <RadzenText TextStyle="TextStyle.H6" class="chart-title"><RadzenIcon Icon="edit_note" /> Questions answered vs unanswered</RadzenText>
             <RadzenChart Style="height: 260px;">
-                <RadzenPieSeries Data="@_questionsStatus" CategoryProperty="Category" ValueProperty="Value" />
+                <RadzenPieSeries Data="@data.QuestionsStatus" CategoryProperty="Category" ValueProperty="Value" />
                 <RadzenLegend Position="LegendPosition.Right" />
             </RadzenChart>
         </div>
@@ -99,7 +105,7 @@ else
                     <span class="action-btn-content"><RadzenIcon Icon="account_circle" /> Manage Profiles</span>
                 </RadzenButton>
                 <RadzenButton ButtonStyle="ButtonStyle.Info" Style="width: 100%; justify-content: flex-start;" Click="@(() => Navigation.NavigateTo("/questions"))">
-                    <span class="action-btn-content"><RadzenIcon Icon="help" /> Answer Questions (@_unansweredQuestions unanswered)</span>
+                    <span class="action-btn-content"><RadzenIcon Icon="help" /> Answer Questions (@data.UnansweredQuestions unanswered)</span>
                 </RadzenButton>
                 <RadzenButton ButtonStyle="ButtonStyle.Base" Style="width: 100%; justify-content: flex-start;" Click="@(() => Navigation.NavigateTo("/settings"))">
                     <span class="action-btn-content"><RadzenIcon Icon="settings" /> Configure Settings</span>
@@ -114,7 +120,7 @@ else
             <RadzenButton Text="View All" Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Base" Click="@(() => Navigation.NavigateTo("/jobs"))" />
         </div>
 
-        @if (_recentJobs.Count == 0)
+        @if (data.RecentJobs.Count == 0)
         {
             <EmptyState Message="No jobs collected yet. Create a profile to start searching." />
         }
@@ -133,13 +139,13 @@ else
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var job in _recentJobs)
+                        @foreach (var job in data.RecentJobs)
                         {
                             <tr>
                                 <td><a href="/jobs/@job.Id" class="job-link">@job.Title</a></td>
                                 <td>@job.Company</td>
                                 <td><RadzenBadge BadgeStyle="BadgeStyle.Light">@job.Platform</RadzenBadge></td>
-                                <td><StatusBadge Status="job.Status" /></td>
+                                <td><StatusBadge StatusText="@job.Status" /></td>
                                 <td>
                                     @if (job.MatchScore.HasValue)
                                     {

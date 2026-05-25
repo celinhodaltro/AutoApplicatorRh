@@ -88,9 +88,10 @@ public sealed class SelectFieldFiller : IFieldFiller
     {
         try
         {
+            var escapedId = CssSelectorHelper.EscapeCssId(field.ElementId);
             var selector = string.IsNullOrEmpty(field.ElementId)
                 ? throw new InvalidOperationException("ElementId is empty, cannot fill")
-                : $"#{field.ElementId}";
+                : $"#{escapedId}";
 
             var bestOption = FindBestOption(answer, field.Options ?? []);
             var valueToSelect = bestOption ?? answer;

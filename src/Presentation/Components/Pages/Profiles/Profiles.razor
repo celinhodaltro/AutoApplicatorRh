@@ -2,10 +2,14 @@
 @using Radzen
 @using Radzen.Blazor
 @using MediatR
+@using AutoApplicator.Application.DTOs
 @using AutoApplicator.Application.Queries.Profiles
 @using AutoApplicator.Application.Commands.Profiles
+@using AutoApplicator.Domain.Enums
+@using AutoApplicator.Domain.Entities
 @inject IMediator Mediator
 @inject DialogService DialogService
+@inject ProfileListViewModel ViewModel
 
 <RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 24px;">Search Profiles</RadzenText>
 
@@ -25,7 +29,7 @@
             </tr>
         </thead>
         <tbody>
-            @foreach (var profile in _profiles)
+            @foreach (var profile in ViewModel.Profiles)
             {
                 <tr style="border-bottom: 1px solid var(--rz-grid-border);">
                     <td style="padding: 8px 12px;">@profile.Name</td>
@@ -45,16 +49,9 @@
 </div>
 
 @code {
-    private List<SearchProfile> _profiles = [];
-
     protected override async Task OnInitializedAsync()
     {
-        await LoadProfiles();
-    }
-
-    private async Task LoadProfiles()
-    {
-        _profiles = await Mediator.Send(new GetProfilesQuery());
+        await ViewModel.LoadProfilesAsync();
     }
 
     private async Task OpenNew()
@@ -81,12 +78,15 @@
 
         if (result is true)
         {
-            await LoadProfiles();
+            await ViewModel.LoadProfilesAsync();
         }
     }
 
-    private async Task OpenEdit(SearchProfile profile)
+    private async Task OpenEdit(ProfileDto profileDto)
     {
+        var profile = await Mediator.Send(new GetProfileByIdQuery(profileDto.Id));
+        if (profile is null) return;
+
         var result = await DialogService.OpenAsync<ProfileEditDialog>(
             $"Edit Profile - {profile.Name}",
             new Dictionary<string, object?>
@@ -97,21 +97,25 @@
 
         if (result is true)
         {
-            await LoadProfiles();
+            await ViewModel.LoadProfilesAsync();
         }
     }
 
-    private async Task ToggleEnabled(SearchProfile profile, bool value)
+    private async Task ToggleEnabled(ProfileDto profileDto, bool value)
     {
+        var profile = await Mediator.Send(new GetProfileByIdQuery(profileDto.Id));
+        if (profile is null) return;
+
         profile.Enabled = value;
         profile.UpdatedAt = DateTime.UtcNow;
         await Mediator.Send(new SaveProfileCommand(profile, false));
+        await ViewModel.LoadProfilesAsync();
     }
 
-    private async Task ConfirmDelete(SearchProfile profile)
+    private async Task ConfirmDelete(ProfileDto profileDto)
     {
         var confirmed = await DialogService.Confirm(
-            $"Are you sure you want to delete profile \"{profile.Name}\"?",
+            $"Are you sure you want to delete profile \"{profileDto.Name}\"?",
             "Confirm Delete",
             new ConfirmOptions
             {
@@ -121,8 +125,7 @@
 
         if (confirmed == true)
         {
-            await Mediator.Send(new DeleteProfileCommand(profile.Id));
-            await LoadProfiles();
+            await ViewModel.DeleteProfileAsync(profileDto.Id);
         }
     }
 }

@@ -3,6 +3,7 @@ using AutoApplicator.Domain.Enums;
 using AutoApplicator.Domain.Interfaces;
 using FluentValidation;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace AutoApplicator.Application.Queries.Jobs;
@@ -34,28 +35,28 @@ public sealed class GetJobsQueryHandler(
 {
     public async Task<List<JobListing>> Handle(GetJobsQuery request, CancellationToken ct)
     {
-        var jobs = (await jobRepository.GetAllAsync(ct)).AsEnumerable();
+        var query = jobRepository.Query();
 
         if (request.Status.HasValue)
-        {
-            jobs = jobs.Where(j => j.Status == request.Status.Value);
-        }
+            query = query.Where(j => j.Status == request.Status.Value);
 
         if (!string.IsNullOrEmpty(request.Platform)
             && Enum.TryParse<PlatformType>(request.Platform, ignoreCase: true, out var platform))
         {
-            jobs = jobs.Where(j => j.Platform == platform);
+            query = query.Where(j => j.Platform == platform);
         }
 
-        var result = jobs
+        var total = await query.CountAsync(ct);
+
+        var items = await query
             .OrderByDescending(j => j.CreatedAt)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
-            .ToList();
+            .ToListAsync(ct);
 
-        logger.LogInformation("Retrieved {Count} job(s) (page {Page}, size {PageSize})",
-            result.Count, request.Page, request.PageSize);
+        logger.LogInformation("Retrieved {Count} of {Total} job(s) (page {Page}, size {PageSize})",
+            items.Count, total, request.Page, request.PageSize);
 
-        return result;
+        return items;
     }
 }

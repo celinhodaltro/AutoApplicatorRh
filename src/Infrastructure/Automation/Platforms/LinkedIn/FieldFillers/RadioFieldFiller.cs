@@ -177,7 +177,7 @@ public sealed class RadioFieldFiller : IFieldFiller
             // Strategy 1: Search by container label
             if (!string.IsNullOrEmpty(field.ElementId))
             {
-                var radio = page.Locator($"#{field.ElementId}");
+                var radio = page.Locator($"#{CssSelectorHelper.EscapeCssId(field.ElementId)}");
                 if (await radio.CountAsync() > 0)
                 {
                     var label = await radio.EvaluateAsync<string>("(el) => el.closest('label')?.textContent?.trim() || ''");

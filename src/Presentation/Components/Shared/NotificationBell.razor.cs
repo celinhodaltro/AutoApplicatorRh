@@ -8,10 +8,12 @@ public partial class NotificationBell : IDisposable
     [Inject] private INotificationService NotificationService { get; set; } = default!;
 
     private bool _showPanel;
+    private Action? _onNotificationsChanged;
 
     protected override void OnInitialized()
     {
-        NotificationService.NotificationsChanged += () => InvokeAsync(StateHasChanged);
+        _onNotificationsChanged = () => InvokeAsync(StateHasChanged);
+        NotificationService.NotificationsChanged += _onNotificationsChanged;
     }
 
     private void TogglePanel() => _showPanel = !_showPanel;
@@ -44,6 +46,9 @@ public partial class NotificationBell : IDisposable
 
     public void Dispose()
     {
-        NotificationService.NotificationsChanged -= () => InvokeAsync(StateHasChanged);
+        if (_onNotificationsChanged is not null)
+        {
+            NotificationService.NotificationsChanged -= _onNotificationsChanged;
+        }
     }
 }

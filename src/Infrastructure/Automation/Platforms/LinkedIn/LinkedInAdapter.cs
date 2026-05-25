@@ -1,8 +1,10 @@
+using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
 using AutoApplicator.Infrastructure.Automation.Abstractions;
 using AutoApplicator.Infrastructure.Automation.Common;
 using AutoApplicator.Infrastructure.Automation.Models;
+using AutoApplicator.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 
@@ -27,13 +29,14 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         _logger = logger;
     }
 
-    public async Task<AuthCheckResult> IsAuthenticatedAsync(IPage page)
+    public async Task<AuthCheckResult> IsAuthenticatedAsync(IBrowserPage page)
     {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         foreach (var sel in LinkedInSelectors.AuthSelectors)
         {
             try
             {
-                var locator = page.Locator(sel).First;
+                var locator = innerPage.Locator(sel).First;
                 await locator.WaitForAsync(new() { Timeout = 3000 });
                 var visible = await locator.IsVisibleAsync();
                 if (visible)
@@ -42,12 +45,12 @@ public sealed class LinkedInAdapter : IPlatformAdapter
             catch { /* try next selector */ }
         }
 
-        var url = page.Url;
+        var url = innerPage.Url;
         if (url.Contains("/feed") || url.Contains("/jobs") || url.Contains("/in/"))
         {
             try
             {
-                var signInLocator = page
+                var signInLocator = innerPage
                     .Locator("a[data-tracking-control-name=\"guest_homepage-basic_nav-header-signin\"]")
                     .First;
                 await signInLocator.WaitForAsync(new() { Timeout = 2000 });
@@ -55,17 +58,21 @@ public sealed class LinkedInAdapter : IPlatformAdapter
                 return new AuthCheckResult
                 {
                     IsAuthenticated = !signIn,
-                    LoginUrl = "https://www.linkedin.com/login",
+                    LoginUrl = "https://www.linkedin.com/login/pt",
                     Message = signIn ? "LinkedIn: please log in first" : ""
                 };
             }
-            catch { /* try next approach */ }
+            catch
+            {
+                // Sign-in button not found = user IS logged in
+                return new AuthCheckResult { IsAuthenticated = true };
+            }
         }
 
         return new AuthCheckResult
         {
             IsAuthenticated = false,
-            LoginUrl = "https://www.linkedin.com/login",
+            LoginUrl = "https://www.linkedin.com/login/pt",
             Message = "LinkedIn: authentication required"
         };
     }
@@ -135,28 +142,30 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         return $"{BaseUrl}/jobs/search/?{paramString}";
     }
 
-    public async Task<List<ExtractedJob>> ExtractListingsAsync(IPage page)
+    public async Task<List<ExtractedJob>> ExtractListingsAsync(IBrowserPage page)
     {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         foreach (var sel in LinkedInSelectors.ListSelectors)
         {
-            var visible = await page.Locator(sel).First.IsVisibleAsync();
+            var visible = await innerPage.Locator(sel).First.IsVisibleAsync();
             if (visible)
             {
-                await _behavior.ScrollListAsync(page, sel);
+                await _behavior.ScrollListAsync(innerPage, sel);
                 break;
             }
         }
 
-        return await _extractor.ExtractJobCardsAsync(page);
+        return await _extractor.ExtractJobCardsAsync(innerPage);
     }
 
-    public async Task<bool> HasNextPageAsync(IPage page)
+    public async Task<bool> HasNextPageAsync(IBrowserPage page)
     {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         foreach (var sel in LinkedInSelectors.PaginationSelectors)
         {
             try
             {
-                var locator = page.Locator(sel).First;
+                var locator = innerPage.Locator(sel).First;
                 var visible = await locator.IsVisibleAsync();
                 if (visible)
                 {
@@ -169,17 +178,18 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         return false;
     }
 
-    public async Task GoToNextPageAsync(IPage page)
+    public async Task GoToNextPageAsync(IBrowserPage page)
     {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         foreach (var sel in LinkedInSelectors.PaginationSelectors)
         {
             try
             {
-                var visible = await page.Locator(sel).First.IsVisibleAsync();
+                var visible = await innerPage.Locator(sel).First.IsVisibleAsync();
                 if (visible)
                 {
-                    await _behavior.HumanClickAsync(page, sel);
-                    await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+                    await _behavior.HumanClickAsync(innerPage, sel);
+                    await innerPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
                     await _behavior.DelayAsync(2000, 4000);
                     return;
                 }
@@ -189,12 +199,13 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         _logger.LogWarning("Could not find next page button on LinkedIn");
     }
 
-    public async Task NavigateToPageAsync(IPage page, SearchProfile profile, int pageNum)
+    public async Task NavigateToPageAsync(IBrowserPage page, SearchProfile profile, int pageNum)
     {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         var url = BuildSearchUrl(profile, pageNum);
         _logger.LogInformation("Navigating to page {PageNum}: {Url}", pageNum, url);
         
-        await page.GotoAsync(url, new() 
+        await innerPage.GotoAsync(url, new() 
         { 
             WaitUntil = WaitUntilState.DOMContentLoaded,
             Timeout = 30000 
@@ -208,7 +219,7 @@ public sealed class LinkedInAdapter : IPlatformAdapter
             {
                 try
                 {
-                    var count = await page.Locator(sel).CountAsync();
+                    var count = await innerPage.Locator(sel).CountAsync();
                     if (count > 0)
                     {
                         _logger.LogInformation("Page {PageNum}: Found {Count} job cards via '{Selector}'", pageNum, count, sel);
@@ -233,22 +244,23 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         // Extra scroll to trigger lazy loading
         try
         {
-            await page.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight)");
+            await innerPage.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight)");
             await Task.Delay(1000);
-            await page.EvaluateAsync("window.scrollTo(0, 0)");
+            await innerPage.EvaluateAsync("window.scrollTo(0, 0)");
             await Task.Delay(500);
         }
         catch { }
     }
 
-    public async Task<JobDetail> ExtractJobDetailsAsync(IPage page, string url)
+    public async Task<JobDetail> ExtractJobDetailsAsync(IBrowserPage page, string url)
     {
-        if (!page.Url.Contains(url) && !string.IsNullOrEmpty(url))
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+        if (!innerPage.Url.Contains(url) && !string.IsNullOrEmpty(url))
         {
-            await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+            await innerPage.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
             await _behavior.DelayAsync(1000, 2000);
         }
 
-        return await _extractor.ExtractJobDetailsAsync(page);
+        return await _extractor.ExtractJobDetailsAsync(innerPage);
     }
 }

@@ -12,18 +12,21 @@ public sealed class LinkedInPaginator
     private readonly ILogger<LinkedInPaginator> _logger;
     private readonly LinkedInDedupService _dedup;
     private readonly LinkedInExtractor _extractor;
+    private readonly LinkedInAdapter _adapter;
     private static readonly int JobsPerPage = 25;
 
     public LinkedInPaginator(
         IHumanBehavior behavior,
         ILogger<LinkedInPaginator> logger,
         LinkedInDedupService dedup,
-        LinkedInExtractor extractor)
+        LinkedInExtractor extractor,
+        LinkedInAdapter adapter)
     {
         _behavior = behavior;
         _logger = logger;
         _dedup = dedup;
         _extractor = extractor;
+        _adapter = adapter;
     }
 
     public async Task<List<ExtractedJob>> GetAllPagesAsync(
@@ -67,64 +70,9 @@ public sealed class LinkedInPaginator
         return allJobs;
     }
 
-    private static string BuildPageUrl(SearchProfile profile, int pageNum)
+    private string BuildPageUrl(SearchProfile profile, int pageNum)
     {
-        var queryParts = new List<string>();
-        if (profile.Keywords.Count > 0 || profile.ExcludeTerms.Count > 0)
-        {
-            queryParts.AddRange(profile.Keywords);
-            queryParts.AddRange(profile.ExcludeTerms.Select(t => $"-{t}"));
-        }
-
-        var parameters = new Dictionary<string, string>();
-        if (queryParts.Count > 0)
-            parameters["keywords"] = string.Join(" ", queryParts);
-        if (profile.Location.Count > 0)
-            parameters["location"] = profile.Location[0];
-
-        // Usa os mesmos dicionários do LinkedInSelectors (já existentes)
-        if (!string.IsNullOrEmpty(profile.DatePosted) && LinkedInSelectors.DatePostedMap.TryGetValue(profile.DatePosted, out var tpr))
-            parameters["f_TPR"] = tpr;
-
-        if (profile.JobTypes.Count > 0)
-        {
-            var types = profile.JobTypes
-                .Select(t => LinkedInSelectors.JobTypeMap.GetValueOrDefault(t))
-                .Where(t => t is not null).ToList();
-            if (types.Count > 0)
-                parameters["f_JT"] = string.Join(",", types);
-        }
-
-        if (profile.ExperienceLevel.Count > 0)
-        {
-            var levels = profile.ExperienceLevel
-                .Select(l => LinkedInSelectors.ExperienceMap.GetValueOrDefault(l))
-                .Where(l => l is not null).ToList();
-            if (levels.Count > 0)
-                parameters["f_E"] = string.Join(",", levels);
-        }
-
-        if (profile.RemoteOnly) parameters["f_WT"] = "2";
-
-        if (profile.SalaryMin.HasValue)
-        {
-            var buckets = new[] { 40000, 60000, 80000, 100000, 120000, 140000, 160000, 180000, 200000 };
-            var bucket = Array.FindLast(buckets, b => b <= profile.SalaryMin.Value);
-            if (bucket > 0)
-            {
-                var code = Array.IndexOf(buckets, bucket) + 1;
-                parameters["f_SB2"] = code.ToString();
-            }
-        }
-
-        if (profile.EasyApplyOnly) parameters["f_AL"] = "true";
-
-        if (pageNum > 1)
-            parameters["start"] = ((pageNum - 1) * 25).ToString();
-
-        var paramString = string.Join("&", parameters.Select(p =>
-            $"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value)}"));
-        return $"https://www.linkedin.com/jobs/search/?{paramString}";
+        return _adapter.BuildSearchUrl(profile, pageNum);
     }
 
     private async Task WaitForCardsAsync(IPage page)

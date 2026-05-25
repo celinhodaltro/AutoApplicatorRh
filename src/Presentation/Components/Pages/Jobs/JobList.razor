@@ -9,18 +9,17 @@
             <RadzenText TextStyle="TextStyle.Body2" class="page-subtitle">Manage and review your collected job listings</RadzenText>
         </div>
         <div class="header-summary">
-            <span class="summary-badge">@_filteredJobs.Count shown</span>
-            <span class="summary-badge muted">@_allJobs.Count total</span>
+            <span class="summary-badge">@ViewModel.Jobs.Count shown</span>
         </div>
     </div>
 
     <div class="filter-bar">
-        <RadzenButton Text="All" Size="ButtonSize.ExtraSmall" ButtonStyle="@(_statusFilter is null ? ButtonStyle.Primary : ButtonStyle.Base)" Click="@(() => FilterByStatus(null))" />
+        <RadzenButton Text="All" Size="ButtonSize.ExtraSmall" ButtonStyle="@(string.IsNullOrEmpty(ViewModel.SelectedStatus) ? ButtonStyle.Primary : ButtonStyle.Base)" Click="@(() => FilterByStatus(null))" />
         @foreach (var status in Enum.GetValues<JobStatus>())
         {
             <RadzenButton Text="@status.ToString()" Size="ButtonSize.ExtraSmall"
-                ButtonStyle="@(_statusFilter == status ? ButtonStyle.Primary : ButtonStyle.Base)"
-                Click="@(() => FilterByStatus(status))" />
+                ButtonStyle="@(ViewModel.SelectedStatus == status.ToString() ? ButtonStyle.Primary : ButtonStyle.Base)"
+                Click="@(() => FilterByStatus(status.ToString()))" />
         }
     </div>
 
@@ -34,11 +33,11 @@
         </div>
         <div class="action-right">
             <RadzenButton Text="Approve" ButtonStyle="ButtonStyle.Success" Size="ButtonSize.ExtraSmall"
-                Disabled="@(_selectedIds.Count == 0)" Click="@BatchApprove" />
+                Disabled="@(_selectedIds.Count == 0)" Click="@ApproveSelected" />
             <RadzenButton Text="Reject" ButtonStyle="ButtonStyle.Warning" Size="ButtonSize.ExtraSmall"
-                Disabled="@(_selectedIds.Count == 0)" Click="@BatchReject" />
+                Disabled="@(_selectedIds.Count == 0)" Click="@RejectSelected" />
             <RadzenButton Text="Delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.ExtraSmall"
-                Disabled="@(_selectedIds.Count == 0)" Click="@BatchDelete" />
+                Disabled="@(_selectedIds.Count == 0)" Click="@DeleteSelected" />
         </div>
     </div>
 
@@ -57,7 +56,7 @@
                 </tr>
             </thead>
             <tbody>
-                @if (_filteredJobs.Count == 0)
+                @if (ViewModel.Jobs.Count == 0)
                 {
                     <tr>
                         <td colspan="8">
@@ -68,7 +67,7 @@
                         </td>
                     </tr>
                 }
-                @foreach (var job in _filteredJobs)
+                @foreach (var job in ViewModel.Jobs)
                 {
                     <tr class="job-row @(_selectedIds.Contains(job.Id) ? "selected" : "")">
                         <td class="col-check">
@@ -89,7 +88,7 @@
                             }
                         </td>
                         <td class="col-platform"><span class="platform-tag">@job.Platform</span></td>
-                        <td class="col-status"><StatusBadge Status="job.Status" Class="status-badge" /></td>
+                        <td class="col-status"><StatusBadge StatusText="@job.Status" Class="status-badge" /></td>
                         <td class="col-match">
                             @if (job.MatchScore.HasValue)
                             {
@@ -104,10 +103,10 @@
                         <td class="col-actions">
                             <div class="action-buttons">
                                 <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Base" Click="@(() => Navigation.NavigateTo($"/jobs/{job.Id}"))" title="View details"><RadzenIcon Icon="visibility" /></RadzenButton>
-                                @if (job.Status is JobStatus.New)
+                                @if (job.Status == "New")
                                 {
-                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Success" Click="@(() => ApproveSingle(job))" title="Approve"><RadzenIcon Icon="check_circle" /></RadzenButton>
-                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Warning" Click="@(() => RejectSingle(job))" title="Reject"><RadzenIcon Icon="cancel" /></RadzenButton>
+                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Success" Click="@(() => ApproveSingle(job.Id))" title="Approve"><RadzenIcon Icon="check_circle" /></RadzenButton>
+                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Warning" Click="@(() => RejectSingle(job.Id))" title="Reject"><RadzenIcon Icon="cancel" /></RadzenButton>
                                 }
                             </div>
                         </td>

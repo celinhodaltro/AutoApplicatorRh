@@ -1,6 +1,8 @@
 @page "/settings"
 @using Radzen
 @using Radzen.Blazor
+@using AutoApplicator.Infrastructure.Services
+@inject BrowserLoginService BrowserLogin
 
 <RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 24px;">Settings</RadzenText>
 
@@ -13,6 +15,12 @@
                     <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@(() => OpenLogin(PlatformType.LinkedIn))"><RadzenIcon Icon="vpn_key" /> LinkedIn Login</RadzenButton>
                     <RadzenButton ButtonStyle="ButtonStyle.Info" Click="@(() => OpenLogin(PlatformType.Indeed))"><RadzenIcon Icon="vpn_key" /> Indeed Login</RadzenButton>
                     <RadzenButton ButtonStyle="ButtonStyle.Secondary" Click="@(() => OpenLogin(PlatformType.Gupy))"><RadzenIcon Icon="vpn_key" /> Gupy Login</RadzenButton>
+                    <RadzenButton ButtonStyle="ButtonStyle.Warning" Click="@(() => OpenLoginInBrowser(PlatformType.Gupy))">
+                        <RadzenIcon Icon="open_in_browser" /> Gupy Login via Playwright
+                    </RadzenButton>
+                    <RadzenText TextStyle="TextStyle.Caption" style="color: var(--rz-text-tertiary); margin-top:8px;">
+                        💡 Use "Login via Playwright" para que a automação reconheça sua sessão. Faça o login na janela do navegador que abrir e depois feche-a.
+                    </RadzenText>
                 </div>
             </div>
         </RadzenTabsItem>

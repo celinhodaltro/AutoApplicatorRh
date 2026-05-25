@@ -60,6 +60,13 @@ public static class MauiProgram
         builder.Logging.ClearProviders();
         builder.Logging.AddSerilog(Log.Logger, dispose: true);
 
+        // ViewModels
+        builder.Services.AddTransient<AutoApplicator.Presentation.Components.ViewModels.JobListViewModel>();
+        builder.Services.AddTransient<AutoApplicator.Presentation.Components.ViewModels.JobDetailViewModel>();
+        builder.Services.AddTransient<AutoApplicator.Presentation.Components.ViewModels.ProfileListViewModel>();
+        builder.Services.AddTransient<AutoApplicator.Presentation.Components.ViewModels.QuestionListViewModel>();
+        builder.Services.AddTransient<AutoApplicator.Presentation.Components.ViewModels.DashboardViewModel>();
+
         var app = builder.Build();
 
         app.Services.InitializeDatabase();

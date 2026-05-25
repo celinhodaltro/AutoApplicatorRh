@@ -144,3 +144,28 @@
 .mode-btn.active:hover {
     background: #1565C0;
 }
+
+.profile-statuses {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.profile-status-item {
+    display: flex;
+    gap: 8px;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.profile-name {
+    font-weight: 600;
+    color: #333;
+    min-width: 80px;
+}
+
+.profile-status {
+    color: #666;
+}

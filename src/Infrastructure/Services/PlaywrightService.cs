@@ -1,6 +1,7 @@
 using AutoApplicator.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
+using System.Threading;
 
 namespace AutoApplicator.Infrastructure.Services;
 
@@ -13,6 +14,7 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
     private IPage? _page;
     private bool _initialized;
     private readonly object _lock = new();
+    private readonly SemaphoreSlim _contextSemaphore = new(1, 1);
 
     private const int DefaultTimeout = 30_000;
 
@@ -20,6 +22,11 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "AutoApplicator",
         "playwright-data");
+
+    private static readonly string CookiesPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "AutoApplicator",
+        "playwright-cookies.json");
 
     public PlaywrightService(ILogger<PlaywrightService> logger)
     {
@@ -49,31 +56,31 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
                 Args =
                 [
                     "--start-maximized",
-                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
                     "--disable-features=IsolateOrigins,site-per-process",
-                    "--disable-web-security",
-                    "--disable-features=BlockInsecurePrivateNetworkRequests"
+                    "--disable-features=BlockInsecurePrivateNetworkRequests",
+                    "--window-size=1920,1080"
                 ],
-                Locale = "en-US",
-                TimezoneId = "America/New_York",
-                UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                BypassCSP = true,
-                IgnoreHTTPSErrors = true
+                BypassCSP = true,  // Gupy precisa para carregar scripts
+                Locale = "pt-BR",
+                TimezoneId = "America/Sao_Paulo",
+                UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
             });
 
             var pages = _context.Pages;
             _page = pages.Count > 0 ? pages[0] : await _context.NewPageAsync();
 
-            await _context.AddInitScriptAsync("""
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-                """);
+            await _context.AddInitScriptAsync(GetAntiDetectionScript());
 
             _page.SetDefaultTimeout(DefaultTimeout);
             _page.SetDefaultNavigationTimeout(DefaultTimeout);
 
             _initialized = true;
+
+            await RestoreCookiesAsync();
+
             _logger.LogInformation("Playwright initialized successfully");
         }
         catch (Exception ex)
@@ -100,6 +107,10 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
             if (response is not null && !response.Ok)
             {
                 _logger.LogWarning("Navigation to {Url} returned status {Status}", url, response.Status);
+            }
+            else if (response is not null)
+            {
+                await SaveCookiesAsync();
             }
         }
         catch (Exception ex)
@@ -221,20 +232,10 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
         }
     }
 
-    public async Task<IPage> CreateNewPageAsync()
+    public async Task<IBrowserPage> CreateNewPageAsync()
     {
-        await EnsureInitializedAsync();
-
-        var page = await _context!.NewPageAsync();
-        await page.AddInitScriptAsync(@"Object.defineProperty(navigator, 'webdriver', { get: () => undefined });");
-        page.SetDefaultTimeout(DefaultTimeout);
-        page.SetDefaultNavigationTimeout(DefaultTimeout);
-        return page;
-    }
-
-    public IPage? GetPage()
-    {
-        return _page;
+        var page = await CreatePageWithRetryAsync();
+        return new PlaywrightPageAdapter(page);
     }
 
     private async Task EnsureInitializedAsync()
@@ -247,6 +248,7 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
 
     private async Task CleanupAsync()
     {
+        await _contextSemaphore.WaitAsync();
         try
         {
             if (_page is not null)
@@ -274,7 +276,168 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
         {
             _logger.LogWarning(ex, "Error during Playwright cleanup");
         }
+        finally
+        {
+            _contextSemaphore.Release();
+        }
     }
+
+    private async Task FullReinitializeAsync()
+    {
+        _logger.LogInformation("Starting full Playwright reinitialization...");
+        await CleanupAsync();
+        _initialized = false;
+        await InitializeAsync();
+        _logger.LogInformation("Playwright reinitialized successfully");
+    }
+
+    private async Task<IPage> CreatePageWithRetryAsync(int maxRetries = 3)
+    {
+        for (int attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                await EnsureInitializedAsync();
+
+                if (_context is null)
+                    throw new PlaywrightException("Context is null after initialization");
+
+                await _contextSemaphore.WaitAsync();
+                try
+                {
+                    var page = await _context!.NewPageAsync();
+                    await page.AddInitScriptAsync(GetAntiDetectionScript());
+                    page.SetDefaultTimeout(DefaultTimeout);
+                    page.SetDefaultNavigationTimeout(DefaultTimeout);
+
+                    _logger.LogInformation("Page created successfully on attempt {Attempt}", attempt);
+                    return page;
+                }
+                finally
+                {
+                    _contextSemaphore.Release();
+                }
+            }
+            catch (PlaywrightException ex)
+            {
+                if (attempt < maxRetries)
+                {
+                    var delay = 2000 * attempt;
+                    _logger.LogWarning(ex,
+                        "PlaywrightException on attempt {Attempt}/{MaxRetries}. Reinitializing and retrying in {Delay}ms...",
+                        attempt, maxRetries, delay);
+                    await FullReinitializeAsync();
+                    await Task.Delay(delay);
+                }
+                else
+                {
+                    _logger.LogError(ex,
+                        "Failed to create page after {MaxRetries} attempts. Please keep the browser window open.",
+                        maxRetries);
+                    throw;
+                }
+            }
+        }
+
+        throw new InvalidOperationException("Unexpected error in page creation retry logic.");
+    }
+
+    public async Task SaveCookiesAsync()
+    {
+        try
+        {
+            await _contextSemaphore.WaitAsync();
+            try
+            {
+                var cookies = await _context!.CookiesAsync();
+                var json = System.Text.Json.JsonSerializer.Serialize(cookies);
+                var dir = Path.GetDirectoryName(CookiesPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                await File.WriteAllTextAsync(CookiesPath, json);
+                _logger.LogInformation("Saved {Count} cookies to {Path}", cookies.Count, CookiesPath);
+            }
+            finally
+            {
+                _contextSemaphore.Release();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save cookies to {Path}", CookiesPath);
+        }
+    }
+
+    private async Task RestoreCookiesAsync()
+    {
+        try
+        {
+            if (!File.Exists(CookiesPath))
+            {
+                _logger.LogDebug("No cookies file found at {Path}", CookiesPath);
+                return;
+            }
+
+            var json = await File.ReadAllTextAsync(CookiesPath);
+            var cookies = System.Text.Json.JsonSerializer.Deserialize<Microsoft.Playwright.Cookie[]>(json);
+            if (cookies is not null && cookies.Length > 0)
+            {
+                await _contextSemaphore.WaitAsync();
+                try
+                {
+                    await _context!.AddCookiesAsync(cookies);
+                    _logger.LogInformation("Restored {Count} cookies from {Path}", cookies.Length, CookiesPath);
+                }
+                finally
+                {
+                    _contextSemaphore.Release();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to restore cookies from {Path}", CookiesPath);
+        }
+    }
+
+    private static string GetAntiDetectionScript() => """
+        // Webdriver
+        try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch(e) {}
+
+        // Plugins
+        try { Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] }); } catch(e) {}
+
+        // Languages
+        try { Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en-US', 'en'] }); } catch(e) {}
+
+        // Chrome runtime
+        try {
+            window.chrome = window.chrome || {};
+            window.chrome.runtime = window.chrome.runtime || {};
+        } catch(e) {}
+
+        // Permissions
+        try {
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({ state: Notification.permission }) :
+                    originalQuery(parameters)
+            );
+        } catch(e) {}
+
+        // WebGL vendor (avoid automation detection)
+        try {
+            const getParameter = WebGLRenderingContext.prototype.getParameter;
+            WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                if (parameter === 37445) return 'Intel Inc.'; // UNMASKED_VENDOR_WEBGL
+                if (parameter === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+                return getParameter(parameter);
+            };
+        } catch(e) {}
+    """;
 
     public async ValueTask DisposeAsync()
     {

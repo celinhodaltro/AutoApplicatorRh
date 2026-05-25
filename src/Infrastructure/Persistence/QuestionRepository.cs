@@ -5,16 +5,16 @@ using Microsoft.Extensions.Logging;
 
 namespace AutoApplicator.Infrastructure.Persistence;
 
-public sealed class QuestionRepository : IQuestionRepository
+public sealed class QuestionRepository : RepositoryBase<CollectedQuestion>, IQuestionRepository
 {
-    private readonly AppDbContext _context;
     private readonly ILogger<QuestionRepository> _logger;
 
-    public QuestionRepository(AppDbContext context, ILogger<QuestionRepository> logger)
+    public QuestionRepository(AppDbContext context, ILogger<QuestionRepository> logger) : base(context)
     {
-        _context = context;
         _logger = logger;
     }
+
+    protected override object GetEntityId(CollectedQuestion entity) => entity.Id;
 
     public async Task<CollectedQuestion?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -84,29 +84,6 @@ public sealed class QuestionRepository : IQuestionRepository
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error adding question {QuestionId}", question.Id);
-            throw;
-        }
-    }
-
-    public async Task UpdateAsync(CollectedQuestion question, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var existing = await _context.CollectedQuestions.FindAsync([question.Id], cancellationToken);
-            if (existing is not null)
-            {
-                _context.Entry(existing).CurrentValues.SetValues(question);
-            }
-            else
-            {
-                _context.CollectedQuestions.Attach(question);
-                _context.Entry(question).State = EntityState.Modified;
-            }
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating question {QuestionId}", question.Id);
             throw;
         }
     }

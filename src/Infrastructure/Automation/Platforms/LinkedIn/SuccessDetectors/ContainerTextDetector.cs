@@ -1,3 +1,4 @@
+using AutoApplicator.Domain.Enums;
 using AutoApplicator.Infrastructure.Automation.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
@@ -6,6 +7,8 @@ namespace AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn.SuccessDet
 
 public sealed class ContainerTextDetector : ISuccessDetector
 {
+    public PlatformType Platform => PlatformType.LinkedIn;
+
     private readonly ILogger<ContainerTextDetector> _logger;
 
     public ContainerTextDetector(ILogger<ContainerTextDetector> logger)

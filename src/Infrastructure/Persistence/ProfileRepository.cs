@@ -5,16 +5,16 @@ using Microsoft.Extensions.Logging;
 
 namespace AutoApplicator.Infrastructure.Persistence;
 
-public sealed class ProfileRepository : IProfileRepository
+public sealed class ProfileRepository : RepositoryBase<SearchProfile>, IProfileRepository
 {
-    private readonly AppDbContext _context;
     private readonly ILogger<ProfileRepository> _logger;
 
-    public ProfileRepository(AppDbContext context, ILogger<ProfileRepository> logger)
+    public ProfileRepository(AppDbContext context, ILogger<ProfileRepository> logger) : base(context)
     {
-        _context = context;
         _logger = logger;
     }
+
+    protected override object GetEntityId(SearchProfile entity) => entity.Id;
 
     public async Task<SearchProfile?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -70,29 +70,6 @@ public sealed class ProfileRepository : IProfileRepository
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error adding profile {ProfileId} '{Name}'", profile.Id, profile.Name);
-            throw;
-        }
-    }
-
-    public async Task UpdateAsync(SearchProfile profile, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var existing = await _context.SearchProfiles.FindAsync([profile.Id], cancellationToken);
-            if (existing is not null)
-            {
-                _context.Entry(existing).CurrentValues.SetValues(profile);
-            }
-            else
-            {
-                _context.SearchProfiles.Attach(profile);
-                _context.Entry(profile).State = EntityState.Modified;
-            }
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating profile {ProfileId} '{Name}'", profile.Id, profile.Name);
             throw;
         }
     }

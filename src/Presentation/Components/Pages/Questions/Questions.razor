@@ -1,8 +1,9 @@
 @page "/questions"
 @using Radzen
 @using Radzen.Blazor
+@using AutoApplicator.Application.DTOs
 @using AutoApplicator.Application.Interfaces
-@inject IMediator Mediator
+@inject QuestionListViewModel ViewModel
 @inject INotificationService NotificationService
 
 <div class="questions-page">
@@ -30,17 +31,17 @@
     </div>
 
     <!-- UNANSWERED SECTION -->
-    <div class="section @(!_unansweredQuestions.Any() ? "section--empty" : "")">
+    <div class="section @(!ViewModel.Unanswered.Any() ? "section--empty" : "")">
         <div class="section-header section-header--unanswered">
-            <span class="section-title">❓ Unanswered (@_unansweredQuestions.Count())</span>
-            @if (!_unansweredQuestions.Any())
+            <span class="section-title">❓ Unanswered (@ViewModel.Unanswered.Count)</span>
+            @if (!ViewModel.Unanswered.Any())
             {
                 <span class="section-all-answered">All answered ✨</span>
             }
         </div>
 
         <div class="questions-stack">
-            @foreach (var question in _unansweredQuestions)
+            @foreach (var question in ViewModel.Unanswered)
             {
                 <div class="question-item unanswered">
 
@@ -53,9 +54,9 @@
 
                     <!-- TAGS -->
                     <div class="question-tags">
-                        @if (question.Platform.HasValue)
+                        @if (!string.IsNullOrEmpty(question.Platform))
                         {
-                            <RadzenBadge Text="@question.Platform.ToString()"
+                            <RadzenBadge Text="@question.Platform"
                                          Shade="Shade.Light"
                                          Variant="Variant.Flat"
                                          class="platform-badge" />
@@ -71,18 +72,20 @@
                     <div class="question-body">
                         @switch (question.FieldType)
                         {
-                            case QuestionFieldType.Select:
-                            case QuestionFieldType.Radio:
+                            case "Select":
+                            case "Radio":
 
                                 <RadzenDropDown @bind-Value="@_answers[question.Id]"
                                                 Change="@(args => MarkModified(question.Id))"
-                                                Data="@question.Options"
+                                                Data="@GetDropdownOptions(question.Options)"
+                                                TextProperty="Text"
+                                                ValueProperty="Value"
                                                 Placeholder="Select answer"
                                                 Size="InputSize.Small"
                                                 Style="width:100%;" />
                                 break;
 
-                            case QuestionFieldType.Textarea:
+                            case "Textarea":
 
                                 <RadzenTextArea @bind-Value="@_answers[question.Id]"
                                                 Change="@(args => MarkModified(question.Id))"
@@ -92,7 +95,7 @@
                                                 Style="width:100%;" />
                                 break;
 
-                            case QuestionFieldType.Checkbox:
+                            case "Checkbox":
 
                                 <RadzenCheckBox @bind-Value="@_checkboxAnswers[question.Id]"
                                                 Change="@(args => MarkModified(question.Id))"
@@ -117,7 +120,7 @@
                                           Icon="save"
                                           Size="ButtonSize.Small"
                                           ButtonStyle="ButtonStyle.Success"
-                                          Disabled="@(question.FieldType != QuestionFieldType.Checkbox && string.IsNullOrEmpty(_answers[question.Id]))"
+                                          Disabled="@(question.FieldType != "Checkbox" && string.IsNullOrEmpty(_answers[question.Id]))"
                                           Click="@(() => SaveSingleAnswer(question.Id))" />
 
                             <RadzenButton Text="Delete"
@@ -125,7 +128,7 @@
                                           Size="ButtonSize.Small"
                                           ButtonStyle="ButtonStyle.Danger"
                                           Variant="Variant.Flat"
-                                          Click="@(() => DeleteQuestion(question))" />
+                                          Click="@(() => DeleteQuestion(question.Id))" />
                         </div>
                     </div>
 
@@ -135,19 +138,19 @@
     </div>
 
     <!-- ANSWERED SECTION -->
-    <div class="section @(!_answeredQuestions.Any() ? "section--empty" : "")">
+    <div class="section @(!ViewModel.Answered.Any() ? "section--empty" : "")">
         <div class="section-header section-header--answered @(showAnswered ? "is-expanded" : "")"
              @onclick="ToggleAnsweredSection"
              role="button"
              tabindex="0"
              @onkeydown="HandleAnsweredSectionKeyDown">
 
-            <span class="section-title">✅ Answered (@_answeredQuestions.Count())</span>
+            <span class="section-title">✅ Answered (@ViewModel.Answered.Count)</span>
             <span class="section-toggle">@(showAnswered ? "▲" : "▼")</span>
         </div>
 
         <div class="questions-stack collapse-section @(showAnswered ? "is-visible" : "")">
-            @foreach (var question in _answeredQuestions)
+            @foreach (var question in ViewModel.Answered)
             {
                 <div class="question-item answered @(_expandedCardIds.Contains(question.Id) ? "expanded" : "collapsed")">
 
@@ -164,9 +167,9 @@
 
                         <!-- TAGS -->
                         <div class="question-tags">
-                            @if (question.Platform.HasValue)
+                            @if (!string.IsNullOrEmpty(question.Platform))
                             {
-                                <RadzenBadge Text="@question.Platform.ToString()"
+                                <RadzenBadge Text="@question.Platform"
                                              Shade="Shade.Light"
                                              Variant="Variant.Flat"
                                              class="platform-badge" />
@@ -182,18 +185,20 @@
                         <div class="question-body">
                             @switch (question.FieldType)
                             {
-                                case QuestionFieldType.Select:
-                                case QuestionFieldType.Radio:
+                                case "Select":
+                                case "Radio":
 
                                     <RadzenDropDown @bind-Value="@_answers[question.Id]"
                                                     Change="@(args => MarkModified(question.Id))"
-                                                    Data="@question.Options"
+                                                    Data="@GetDropdownOptions(question.Options)"
+                                                    TextProperty="Text"
+                                                    ValueProperty="Value"
                                                     Placeholder="Select answer"
                                                     Size="InputSize.Small"
                                                     Style="width:100%;" />
                                     break;
 
-                                case QuestionFieldType.Textarea:
+                                case "Textarea":
 
                                     <RadzenTextArea @bind-Value="@_answers[question.Id]"
                                                     Change="@(args => MarkModified(question.Id))"
@@ -203,7 +208,7 @@
                                                     Style="width:100%;" />
                                     break;
 
-                                case QuestionFieldType.Checkbox:
+                                case "Checkbox":
 
                                     <RadzenCheckBox @bind-Value="@_checkboxAnswers[question.Id]"
                                                     Change="@(args => MarkModified(question.Id))"
@@ -228,7 +233,7 @@
                                               Icon="save"
                                               Size="ButtonSize.Small"
                                               ButtonStyle="ButtonStyle.Success"
-                                              Disabled="@(question.FieldType != QuestionFieldType.Checkbox && string.IsNullOrEmpty(_answers[question.Id]))"
+                                              Disabled="@(question.FieldType != "Checkbox" && string.IsNullOrEmpty(_answers[question.Id]))"
                                               Click="@(() => SaveSingleAnswer(question.Id))" />
 
                                 <RadzenButton Text="▲ Hide"
@@ -242,7 +247,7 @@
                                               Size="ButtonSize.Small"
                                               ButtonStyle="ButtonStyle.Danger"
                                               Variant="Variant.Flat"
-                                              Click="@(() => DeleteQuestion(question))" />
+                                              Click="@(() => DeleteQuestion(question.Id))" />
                             </div>
                         </div>
                     }
@@ -272,7 +277,7 @@
         </div>
     </div>
 
-    @if (_allQuestions.Count == 0)
+    @if (ViewModel.Questions.Count == 0)
     {
         <RadzenCard class="empty-card">
             <RadzenText TextStyle="TextStyle.Body1">
@@ -284,7 +289,6 @@
 </div>
 
 @code {
-    private List<CollectedQuestion> _allQuestions = [];
     private Dictionary<Guid, string> _answers = [];
     private Dictionary<Guid, bool> _checkboxAnswers = [];
     private HashSet<Guid> _modifiedQuestionIds = [];
@@ -292,30 +296,24 @@
     private bool showAnswered;
     private HashSet<Guid> _expandedCardIds = [];
 
-    private IEnumerable<CollectedQuestion> _unansweredQuestions
-        => _allQuestions.Where(q => string.IsNullOrEmpty(q.Answer));
-
-    private IEnumerable<CollectedQuestion> _answeredQuestions
-        => _allQuestions.Where(q => !string.IsNullOrEmpty(q.Answer));
-
     // ──────────────────────────────────────────────
     //  Lifecycle
     // ──────────────────────────────────────────────
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadQuestions();
+        await ViewModel.LoadQuestionsAsync();
+        InitializeAnswerDictionaries();
     }
 
     // ──────────────────────────────────────────────
     //  Data
     // ──────────────────────────────────────────────
 
-    private async Task LoadQuestions()
+    private void InitializeAnswerDictionaries()
     {
-        _allQuestions = await Mediator.Send(new GetQuestionsQuery());
-        _answers = _allQuestions.ToDictionary(q => q.Id, q => q.Answer);
-        _checkboxAnswers = _allQuestions.ToDictionary(q => q.Id, q => !string.IsNullOrEmpty(q.Answer));
+        _answers = ViewModel.Questions.ToDictionary(q => q.Id, q => q.Answer);
+        _checkboxAnswers = ViewModel.Questions.ToDictionary(q => q.Id, q => !string.IsNullOrEmpty(q.Answer));
         _modifiedQuestionIds.Clear();
     }
 
@@ -330,7 +328,7 @@
         if (showAnswered)
         {
             // Expand all answered cards when section opens
-            _expandedCardIds = _answeredQuestions.Select(q => q.Id).ToHashSet();
+            _expandedCardIds = ViewModel.Answered.Select(q => q.Id).ToHashSet();
         }
         else
         {
@@ -368,14 +366,14 @@
     {
         try
         {
-            var question = _allQuestions.FirstOrDefault(q => q.Id == questionId);
+            var question = ViewModel.Questions.FirstOrDefault(q => q.Id == questionId);
             if (question is null) return;
 
-            var answer = question.FieldType == QuestionFieldType.Checkbox
+            var answer = question.FieldType == "Checkbox"
                 ? (_checkboxAnswers.GetValueOrDefault(questionId) ? "Yes" : "")
                 : (_answers.GetValueOrDefault(questionId) ?? "");
 
-            if (question.FieldType != QuestionFieldType.Checkbox && string.IsNullOrEmpty(answer))
+            if (question.FieldType != "Checkbox" && string.IsNullOrEmpty(answer))
             {
                 NotificationService.Add(
                     NotificationType.Warning,
@@ -384,15 +382,14 @@
                 return;
             }
 
-            await Mediator.Send(new SetQuestionAnswerCommand(questionId, answer));
+            await ViewModel.SaveAnswerAsync(questionId, answer);
             _modifiedQuestionIds.Remove(questionId);
+            InitializeAnswerDictionaries();
 
             NotificationService.Add(
                 NotificationType.Success,
                 "Saved",
                 "Answer saved successfully.");
-
-            await LoadQuestions();
         }
         catch (Exception ex)
         {
@@ -411,14 +408,14 @@
         {
             try
             {
-                var question = _allQuestions.FirstOrDefault(q => q.Id == questionId);
+                var question = ViewModel.Questions.FirstOrDefault(q => q.Id == questionId);
                 if (question is null) continue;
 
-                var answer = question.FieldType == QuestionFieldType.Checkbox
+                var answer = question.FieldType == "Checkbox"
                     ? (_checkboxAnswers.GetValueOrDefault(questionId) ? "Yes" : "")
                     : (_answers.GetValueOrDefault(questionId) ?? "");
 
-                await Mediator.Send(new SetQuestionAnswerCommand(questionId, answer));
+                await ViewModel.SaveAnswerAsync(questionId, answer);
             }
             catch (Exception ex)
             {
@@ -443,22 +440,21 @@
                 $"{errors.Count} question(s) failed to save.");
         }
 
-        await LoadQuestions();
+        InitializeAnswerDictionaries();
     }
 
-    private async Task DeleteQuestion(CollectedQuestion question)
+    private async Task DeleteQuestion(Guid questionId)
     {
         try
         {
-            await Mediator.Send(new DeleteQuestionCommand(question.Id));
-            _modifiedQuestionIds.Remove(question.Id);
+            await ViewModel.DeleteQuestionAsync(questionId);
+            _modifiedQuestionIds.Remove(questionId);
+            InitializeAnswerDictionaries();
 
             NotificationService.Add(
                 NotificationType.Success,
                 "Deleted",
                 "Question deleted successfully.");
-
-            await LoadQuestions();
         }
         catch (Exception ex)
         {
@@ -473,12 +469,12 @@
     //  Helpers
     // ──────────────────────────────────────────────
 
-    private static string GetTypeLabel(QuestionFieldType type) => type switch
+    private static string GetTypeLabel(string fieldType) => fieldType switch
     {
-        QuestionFieldType.Select => "Select",
-        QuestionFieldType.Radio => "Radio",
-        QuestionFieldType.Checkbox => "Checkbox",
-        QuestionFieldType.File => "File",
+        "Select" => "Select",
+        "Radio" => "Radio",
+        "Checkbox" => "Checkbox",
+        "File" => "File",
         _ => "Input"
     };
 
@@ -486,5 +482,19 @@
     {
         if (string.IsNullOrEmpty(answer)) return "";
         return answer.Length > maxLength ? answer[..maxLength] + "…" : answer;
+    }
+
+    private List<OptionItem> GetDropdownOptions(List<string>? options)
+    {
+        return options?
+            .Where(o => !string.IsNullOrWhiteSpace(o))
+            .Select(o => new OptionItem { Text = o, Value = o })
+            .ToList() ?? [];
+    }
+
+    private class OptionItem
+    {
+        public string Text { get; set; } = "";
+        public string Value { get; set; } = "";
     }
 }

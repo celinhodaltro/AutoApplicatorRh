@@ -19,9 +19,15 @@
         {
             <div class="automation-status">
                 <div class="status-spinner"></div>
-                <span class="status-text">
-                    @AutomationService.CurrentStatus.Progress @AutomationService.CurrentStatus.Message
-                </span>
+                <div class="profile-statuses">
+                    @foreach (var kvp in AutomationService.ProfileStatuses)
+                    {
+                        <div class="profile-status-item">
+                            <span class="profile-name">@kvp.Key</span>
+                            <span class="profile-status">@kvp.Value</span>
+                        </div>
+                    }
+                </div>
             </div>
         }
         else

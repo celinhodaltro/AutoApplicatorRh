@@ -2,7 +2,6 @@ using AutoApplicator.Infrastructure.Automation.Abstractions;
 using AutoApplicator.Infrastructure.Automation.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace AutoApplicator.Infrastructure.Automation.Platforms.Gupy;
@@ -26,7 +25,7 @@ public sealed class GupyExtractor
         {
             await _behavior.DelayAsync(2000, 3000);
 
-            var jobLinks = await page.QuerySelectorAllAsync("a[href*=\"/job/\"]");
+            var jobLinks = await page.QuerySelectorAllAsync(GupySelectors.JobCardSelector);
             var processedUrls = new HashSet<string>();
 
             foreach (var link in jobLinks)
@@ -39,27 +38,35 @@ public sealed class GupyExtractor
                     var url = href.StartsWith("http") ? href : $"https://portal.gupy.io{href}";
                     if (!processedUrls.Add(url)) continue;
 
-                    // Extract title from h3 inside the link
-                    var titleEl = await link.QuerySelectorAsync("h3");
-                    var title = titleEl is not null ? (await titleEl.InnerTextAsync())?.Trim() : string.Empty;
+                    // Extract data from aria-label:
+                    // "Ir para vaga {title} da empresa {company} na cidade {city}..."
+                    var ariaLabel = await link.GetAttributeAsync("aria-label");
+                    if (string.IsNullOrEmpty(ariaLabel)) continue;
+
+                    var title = ExtractFromLabel(ariaLabel, "Ir para vaga ", " da empresa ");
                     if (string.IsNullOrEmpty(title)) continue;
 
-                    // Extract company from aria-label: "Ir para vaga {title} da empresa {company}"
-                    var ariaLabel = await link.GetAttributeAsync("aria-label");
-                    string? company = null;
-                    if (!string.IsNullOrEmpty(ariaLabel))
+                    var company = ExtractFromLabel(ariaLabel, " da empresa ", " na cidade ")
+                                  ?? ExtractFromLabel(ariaLabel, " da empresa ", " em ")
+                                  ?? ExtractFromLabel(ariaLabel, " da empresa ", " na ")
+                                  ?? ExtractFromLabel(ariaLabel, " da empresa ", null);
+
+                    var location = ExtractFromLabel(ariaLabel, " na cidade ", null)
+                                   ?? ExtractFromLabel(ariaLabel, " em ", null);
+
+                    // Fallback: extract location from [data-testid="job-location"] inside the card
+                    if (string.IsNullOrEmpty(location) || location.Length > 60)
                     {
-                        var match = Regex.Match(ariaLabel, @"da empresa\s+(.+?)$", RegexOptions.IgnoreCase);
-                        if (match.Success)
-                            company = match.Groups[1].Value.Trim();
+                        var locationEl = await link.QuerySelectorAsync(GupySelectors.CardLocationSelector)
+                                         ?? await page.QuerySelectorAsync(GupySelectors.CardLocationSelector);
+                        if (locationEl is not null)
+                            location = (await locationEl.InnerTextAsync())?.Trim();
                     }
 
-                    // Extract location from [data-testid="job-location"]
-                    var locationEl = await page.QuerySelectorAsync("[data-testid=\"job-location\"]");
-                    var location = locationEl is not null ? (await locationEl.InnerTextAsync())?.Trim() : string.Empty;
+                    // Extract ExternalId from URL (e.g., /job/12345 -> 12345)
+                    var externalId = ExtractJobId(href);
 
-                    // Generate ExternalId from URL (base64 encoded path)
-                    var externalId = GenerateExternalId(href);
+                    _logger.LogDebug("Extracted Gupy job: {Title} at {Company} in {Location}", title, company, location);
 
                     cards.Add(new ExtractedJob
                     {
@@ -68,7 +75,7 @@ public sealed class GupyExtractor
                         Company = company ?? string.Empty,
                         Location = location ?? string.Empty,
                         Url = url,
-                        EasyApply = false
+                        EasyApply = true // All Gupy jobs are Easy Apply
                     });
                 }
                 catch
@@ -94,7 +101,7 @@ public sealed class GupyExtractor
         {
             // Extract title from h1
             string? title = null;
-            var titleEl = await page.QuerySelectorAsync("h1");
+            var titleEl = await page.QuerySelectorAsync(GupySelectors.JobTitleSelector);
             if (titleEl is not null)
                 title = (await titleEl.InnerTextAsync())?.Trim();
 
@@ -122,15 +129,44 @@ public sealed class GupyExtractor
         }
     }
 
-    private static string GenerateExternalId(string href)
+    /// <summary>
+    /// Extracts text between two markers. If <paramref name="until"/> is null, extracts from <paramref name="after"/> to end.
+    /// </summary>
+    private static string? ExtractFromLabel(string label, string after, string? until)
     {
-        // Extract job ID from URL path /job/{id}
-        var match = Regex.Match(href, @"/job/([^/?]+)", RegexOptions.IgnoreCase);
+        var startIdx = label.IndexOf(after, StringComparison.Ordinal);
+        if (startIdx < 0) return null;
+
+        startIdx += after.Length;
+        if (startIdx >= label.Length) return null;
+
+        if (until is null)
+            return label[startIdx..].Trim().TrimEnd('.').Trim();
+
+        var endIdx = label.IndexOf(until, startIdx, StringComparison.Ordinal);
+        if (endIdx < 0) return null;
+
+        return label[startIdx..endIdx].Trim().TrimEnd('.').Trim();
+    }
+
+    /// <summary>
+    /// Extracts the numeric job ID from a Gupy URL path (e.g., /job/12345 -> "12345").
+    /// Falls back to a base64-encoded hash of the full href.
+    /// </summary>
+    private static string ExtractJobId(string href)
+    {
+        var match = Regex.Match(href, @"/job/(\d+)", RegexOptions.IgnoreCase);
         if (match.Success)
             return match.Groups[1].Value;
 
-        // Fallback: base64 encode the href
-        return Convert.ToBase64String(Encoding.UTF8.GetBytes(href))
+        // Fallback: use the last path segment
+        match = Regex.Match(href, @"/job/([^/?]+)", RegexOptions.IgnoreCase);
+        if (match.Success)
+            return match.Groups[1].Value;
+
+        // Last resort: base64 encode the href
+        return Convert.ToBase64String(
+                System.Text.Encoding.UTF8.GetBytes(href))
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');

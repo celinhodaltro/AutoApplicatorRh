@@ -6,16 +6,16 @@ using Microsoft.Extensions.Logging;
 
 namespace AutoApplicator.Infrastructure.Persistence;
 
-public sealed class JobRepository : IJobRepository
+public sealed class JobRepository : RepositoryBase<JobListing>, IJobRepository
 {
-    private readonly AppDbContext _context;
     private readonly ILogger<JobRepository> _logger;
 
-    public JobRepository(AppDbContext context, ILogger<JobRepository> logger)
+    public JobRepository(AppDbContext context, ILogger<JobRepository> logger) : base(context)
     {
-        _context = context;
         _logger = logger;
     }
+
+    protected override object GetEntityId(JobListing entity) => entity.Id;
 
     public async Task<JobListing?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -43,6 +43,11 @@ public sealed class JobRepository : IJobRepository
             _logger.LogError(ex, "Error getting all job listings");
             throw;
         }
+    }
+
+    public IQueryable<JobListing> Query()
+    {
+        return _context.JobListings.AsQueryable();
     }
 
     public async Task<IEnumerable<JobListing>> GetByProfileIdAsync(Guid profileId, CancellationToken cancellationToken = default)
@@ -85,29 +90,6 @@ public sealed class JobRepository : IJobRepository
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error adding job {JobId} '{Title}'", job.Id, job.Title);
-            throw;
-        }
-    }
-
-    public async Task UpdateAsync(JobListing job, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var existing = await _context.JobListings.FindAsync([job.Id], cancellationToken);
-            if (existing is not null)
-            {
-                _context.Entry(existing).CurrentValues.SetValues(job);
-            }
-            else
-            {
-                _context.JobListings.Attach(job);
-                _context.Entry(job).State = EntityState.Modified;
-            }
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating job {JobId} '{Title}'", job.Id, job.Title);
             throw;
         }
     }

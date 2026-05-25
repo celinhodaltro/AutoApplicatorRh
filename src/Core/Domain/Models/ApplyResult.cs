@@ -1,4 +1,4 @@
-namespace AutoApplicator.Infrastructure.Automation.Models;
+namespace AutoApplicator.Domain.Models;
 
 public sealed record ApplyResult(
     bool Success,

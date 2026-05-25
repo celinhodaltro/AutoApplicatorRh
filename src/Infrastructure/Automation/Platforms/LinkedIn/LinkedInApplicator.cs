@@ -1,18 +1,21 @@
+using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Application.Commands.Questions;
 using AutoApplicator.Application.Queries.Questions;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
+using AutoApplicator.Domain.Models;
 using AutoApplicator.Infrastructure.Automation.Abstractions;
 using AutoApplicator.Infrastructure.Automation.Common;
 using AutoApplicator.Infrastructure.Automation.Models;
 using AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn.StepNavigators;
+using AutoApplicator.Infrastructure.Services;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 
 namespace AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn;
 
-public sealed class LinkedInApplicator
+public sealed class LinkedInApplicator : IJobApplicator
 {
     private readonly IEnumerable<IFieldFiller> _fieldFillers;
     private readonly IEnumerable<IStepNavigator> _stepNavigators;
@@ -21,6 +24,14 @@ public sealed class LinkedInApplicator
     private readonly ILogger<LinkedInApplicator> _logger;
     private readonly IMediator _mediator;
     private readonly Dictionary<string, string> _answersUsed = [];
+
+    public PlatformType Platform => PlatformType.LinkedIn;
+
+    async Task<ApplyResult> IJobApplicator.ApplyAsync(IBrowserPage page, JobListing job)
+    {
+        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+        return await ApplyAsync(innerPage, job);
+    }
 
     public LinkedInApplicator(
         IEnumerable<IFieldFiller> fieldFillers,
@@ -367,7 +378,7 @@ public sealed class LinkedInApplicator
     {
         await _behavior.DelayAsync(2000, 3000);
 
-        foreach (var detector in _successDetectors)
+        foreach (var detector in _successDetectors.Where(d => d.Platform == PlatformType.LinkedIn))
         {
             if (await detector.DetectAsync(page))
             {

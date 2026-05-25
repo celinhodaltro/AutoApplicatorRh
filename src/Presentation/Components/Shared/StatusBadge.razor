@@ -2,13 +2,20 @@
 @using Radzen
 @using AutoApplicator.Domain.Enums
 
-<RadzenBadge BadgeStyle="@GetStyle()" class="@Class">@Status</RadzenBadge>
+<RadzenBadge BadgeStyle="@GetStyle()" class="@Class">@DisplayText</RadzenBadge>
 
 @code {
     [Parameter] public JobStatus Status { get; set; }
+    [Parameter] public string? StatusText { get; set; }
     [Parameter] public string? Class { get; set; }
-    
-    private BadgeStyle GetStyle() => Status switch
+
+    private string DisplayText => StatusText ?? Status.ToString();
+
+    private JobStatus ResolvedStatus => StatusText is not null && Enum.TryParse<JobStatus>(StatusText, true, out var parsed)
+        ? parsed
+        : Status;
+
+    private BadgeStyle GetStyle() => ResolvedStatus switch
     {
         JobStatus.New => BadgeStyle.Info,
         JobStatus.Approved => BadgeStyle.Success,

@@ -1,3 +1,4 @@
+using AutoApplicator.Domain.Enums;
 using AutoApplicator.Infrastructure.Automation.Abstractions;
 using AutoApplicator.Infrastructure.Automation.Common;
 using Microsoft.Extensions.Logging;
@@ -7,6 +8,8 @@ namespace AutoApplicator.Infrastructure.Automation.Platforms.LinkedIn.SuccessDet
 
 public sealed class PostApplyModalDetector : ISuccessDetector
 {
+    public PlatformType Platform => PlatformType.LinkedIn;
+
     private readonly IHumanBehavior _behavior;
     private readonly ILogger<PostApplyModalDetector> _logger;
 
