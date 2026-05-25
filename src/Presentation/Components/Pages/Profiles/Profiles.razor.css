@@ -1,0 +1,40 @@
+.page-title {
+    margin-bottom: 24px;
+}
+
+.toolbar {
+    margin-bottom: 16px;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+}
+
+.profiles-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.profiles-table thead tr {
+    border-bottom: 2px solid var(--rz-grid-border);
+    text-align: left;
+}
+
+.profiles-table th {
+    padding: 8px 12px;
+    font-weight: 600;
+}
+
+.profiles-table tbody tr {
+    border-bottom: 1px solid var(--rz-grid-border);
+}
+
+.profiles-table td {
+    padding: 8px 12px;
+}
+
+.actions-cell {
+    padding: 8px 12px;
+    display: flex;
+    gap: 4px;
+}

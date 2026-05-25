@@ -35,7 +35,7 @@ public partial class NotificationBell : IDisposable
         _ => "info"
     };
 
-    private static string FormatTime(DateTime timestamp)
+    private static string FormatNotificationTimestamp(DateTime timestamp)
     {
         var diff = DateTime.Now - timestamp;
         if (diff.TotalMinutes < 1) return "Just now";

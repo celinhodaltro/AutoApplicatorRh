@@ -31,7 +31,9 @@ public sealed class PostApplyModalDetector : ISuccessDetector
             {
                 _logger.LogInformation("[Success] Post-apply confirmation modal detected");
 
-                // Try the primary "Concluído" / "Done" button
+                // Scroll modal to ensure Done/Dismiss button is visible
+                await ScrollModalToBottomAsync(page);
+
                 try
                 {
                     var doneBtn = page.Locator("#post-apply-modal + .artdeco-modal__actionbar button.artdeco-button--primary").First;
@@ -59,5 +61,18 @@ public sealed class PostApplyModalDetector : ISuccessDetector
         }
 
         return false;
+    }
+
+    private static async Task ScrollModalToBottomAsync(IPage page)
+    {
+        await page.EvaluateAsync(@"() => {
+            const modal = document.querySelector(
+                '.jobs-easy-apply-modal, .artdeco-modal');
+            if (!modal) return;
+            const content = modal.querySelector(
+                '.jobs-easy-apply-modal__content, .artdeco-modal__content');
+            if (content) content.scrollTo(0, content.scrollHeight);
+            modal.scrollTo(0, modal.scrollHeight);
+        }");
     }
 }

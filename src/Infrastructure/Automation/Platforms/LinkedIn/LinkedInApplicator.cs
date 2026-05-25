@@ -64,9 +64,9 @@ public sealed class LinkedInApplicator : IJobApplicator
             }
 
             _logger.LogInformation("[{Title}] Modal opened, starting form fill...", job.Title);
-            await _behavior.DelayAsync(1000, 2000);
+            await _behavior.DelayAsync(200, 500);
 
-            var maxSteps = 10;
+            var maxSteps = 6;
             for (var step = 0; step < maxSteps; step++)
             {
                 var (fields, hasUnansweredRequired) = await ProcessFormStepAsync(page, job, step);
@@ -76,7 +76,7 @@ public sealed class LinkedInApplicator : IJobApplicator
 
                 await HandleFileUploadAsync(page, fields);
 
-                await _behavior.DelayAsync(500, 1000);
+                await _behavior.DelayAsync(200, 500);
 
                 var submitResult = await HandleSubmitStepAsync(page, job, fields);
                 if (submitResult is not null)
@@ -86,7 +86,7 @@ public sealed class LinkedInApplicator : IJobApplicator
                 if (advanceResult is not null)
                     return advanceResult;
 
-                await _behavior.DelayAsync(1000, 2000);
+                await _behavior.DelayAsync(200, 500);
             }
 
             await CloseModalAsync(page);
@@ -120,7 +120,11 @@ public sealed class LinkedInApplicator : IJobApplicator
             if (!filled)
             {
                 _logger.LogWarning("[{Title}] ❌ Unanswered required field: \"{Field}\"", job.Title, field.Label);
-                if (field.Required) hasUnansweredRequired = true;
+                if (field.Required)
+                {
+                    hasUnansweredRequired = true;
+                    break; // ← Stop on first unanswered required field
+                }
             }
             else
             {
@@ -133,8 +137,8 @@ public sealed class LinkedInApplicator : IJobApplicator
 
     private async Task<ApplyResult> HandleUnansweredRequiredAsync(IPage page, JobListing job)
     {
-        _logger.LogInformation("[{Title}] ⏭️ Skipping — configure answers in Questions tab", job.Title);
-        await CloseModalAsync(page);
+        _logger.LogInformation("[{Title}] ⏏️ Skipping — unanswered question found. Moving to next job.", job.Title);
+        await CloseModalQuicklyAsync(page);
         return new ApplyResult(false, "Pending questions need configuration", true);
     }
 
@@ -169,7 +173,7 @@ public sealed class LinkedInApplicator : IJobApplicator
             return new ApplyResult(false, "Submit click failed");
         }
 
-        await _behavior.DelayAsync(3000, 4000);
+        await _behavior.DelayAsync(800, 1200);
 
         if (await CheckSubmissionSuccessAsync(page))
         {
@@ -190,7 +194,7 @@ public sealed class LinkedInApplicator : IJobApplicator
                 _logger.LogInformation("[{Title}] 📤 On submit step", job.Title);
                 var submitNav = _stepNavigators.First(s => s is SubmitStepNavigator);
                 await submitNav.NavigateAsync(page);
-                await _behavior.DelayAsync(3000, 4000);
+                await _behavior.DelayAsync(800, 1200);
                 if (await CheckSubmissionSuccessAsync(page))
                 {
                     _logger.LogInformation("[{Title}] ✅ APPLICATION SUBMITTED SUCCESSFULLY!", job.Title);
@@ -210,22 +214,22 @@ public sealed class LinkedInApplicator : IJobApplicator
 
     private async Task<bool> OpenEasyApplyModalAsync(IPage page)
     {
-        var alreadyOpen = await page.WaitForAnySelectorAsync( LinkedInSelectors.ModalContainer, 1000);
+        var alreadyOpen = await page.WaitForAnySelectorAsync( LinkedInSelectors.ModalContainer, 500);
         if (alreadyOpen is not null) return true;
 
-        var selector = await page.WaitForAnySelectorAsync( LinkedInSelectors.EasyApplyButton, 3000);
+        var selector = await page.WaitForAnySelectorAsync( LinkedInSelectors.EasyApplyButton, 1500);
         if (selector is null) return false;
 
         await _behavior.HumanClickAsync(page, selector);
-        await _behavior.DelayAsync(1000, 2000);
+        await _behavior.DelayAsync(200, 500);
 
-        var modalOpen = await page.WaitForAnySelectorAsync( LinkedInSelectors.ModalContainer, 3000);
+        var modalOpen = await page.WaitForAnySelectorAsync( LinkedInSelectors.ModalContainer, 1500);
         return modalOpen is not null;
     }
 
     private async Task<(List<FormField> Fields, string StepTitle)> ExtractFormFieldsAsync(IPage page)
     {
-        await _behavior.DelayAsync(1000, 1500);
+        await _behavior.DelayAsync(100, 300);
 
         var formRoot = page.Locator(".jobs-easy-apply-modal, .artdeco-modal, [data-test-modal-id=\"easy-apply-modal\"]").First;
         var modalExists = await formRoot.IsVisibleAsync();
@@ -259,7 +263,7 @@ public sealed class LinkedInApplicator : IJobApplicator
                     return stepTitle;
                 }
             }
-            catch { /* try next selector */ }
+            catch (Exception ex) { _logger.LogDebug(ex, "Step title not found via selector '{Selector}'", sel); }
         }
 
         return "";
@@ -273,7 +277,6 @@ public sealed class LinkedInApplicator : IJobApplicator
 
         var questionFieldType = MapFieldType(field.Type);
 
-        // Envia comando para upsert via MediatR (persistência desacoplada)
         await _mediator.Send(new UpsertQuestionCommand(
             QuestionText: field.Label,
             FieldType: questionFieldType,
@@ -283,7 +286,6 @@ public sealed class LinkedInApplicator : IJobApplicator
             Company: job.Company,
             Group: stepTitle));
 
-        // Busca a pergunta (incluindo Answer) via query
         var existing = await _mediator.Send(new FindQuestionByTextQuery(field.Label));
 
         if (existing is not null && !string.IsNullOrEmpty(existing.Answer))
@@ -291,11 +293,11 @@ public sealed class LinkedInApplicator : IJobApplicator
 
         if (existing is not null)
         {
-            _logger.LogInformation("[Questions] Sem resposta configurada, pulando: \"{Label}\"", field.Label);
+            _logger.LogInformation("[Questions] No answer configured, skipping: \"{Label}\"", field.Label);
             return false;
         }
 
-        return HandlePrefilledField(field);
+        return IsFieldPrefilledOrOptional(field);
     }
 
     private static QuestionFieldType MapFieldType(FormFieldType fieldType)
@@ -314,23 +316,18 @@ public sealed class LinkedInApplicator : IJobApplicator
 
     private async Task<bool> FillWithSavedAnswerAsync(IPage page, FormField field, CollectedQuestion existing)
     {
-        _logger.LogInformation("[Questions] Usando resposta salva: \"{Label}\" = \"{Answer}\"", field.Label, existing.Answer);
+        _logger.LogInformation("[Questions] Using saved answer: \"{Label}\" = \"{Answer}\"", field.Label, existing.Answer);
         _answersUsed[field.Label] = existing.Answer;
         await FillFieldValueAsync(page, field, existing.Answer);
         return true;
     }
 
-    private static bool HandlePrefilledField(FormField field)
+    private static bool IsFieldPrefilledOrOptional(FormField field)
     {
-        // New question: if field is already pre-filled by LinkedIn (and not a select), skip it
         if (!string.IsNullOrEmpty(field.CurrentValue) && field.Type != FormFieldType.Select)
-        {
             return true;
-        }
 
-        // No saved answer available, check if required
-        if (field.Required) return false;
-        return true;
+        return !field.Required;
     }
 
     private async Task FillFieldValueAsync(IPage page, FormField field, string answer)
@@ -355,7 +352,7 @@ public sealed class LinkedInApplicator : IJobApplicator
             {
                 await fileInput.SetInputFilesAsync(resumePath);
                 _logger.LogInformation("Uploaded resume: {Path}", resumePath);
-                await _behavior.DelayAsync(1000, 2000);
+                await _behavior.DelayAsync(200, 400);
             }
         }
         catch (Exception ex)
@@ -376,7 +373,7 @@ public sealed class LinkedInApplicator : IJobApplicator
 
     private async Task<bool> CheckSubmissionSuccessAsync(IPage page)
     {
-        await _behavior.DelayAsync(2000, 3000);
+        await _behavior.DelayAsync(500, 800);
 
         foreach (var detector in _successDetectors.Where(d => d.Platform == PlatformType.LinkedIn))
         {
@@ -393,18 +390,45 @@ public sealed class LinkedInApplicator : IJobApplicator
     {
         try
         {
-            var dismissSel = await page.WaitForAnySelectorAsync(LinkedInSelectors.DismissButton, 2000);
+            var dismissSel = await page.WaitForAnySelectorAsync(LinkedInSelectors.DismissButton, 1000);
             if (dismissSel is not null)
             {
                 await _behavior.HumanClickAsync(page, dismissSel);
                 await _behavior.DelayAsync(500, 1000);
 
-                var discardSel = await page.WaitForAnySelectorAsync(LinkedInSelectors.DiscardButton, 2000);
+                var discardSel = await page.WaitForAnySelectorAsync(LinkedInSelectors.DiscardButton, 1000);
                 if (discardSel is not null)
                     await _behavior.HumanClickAsync(page, discardSel);
             }
         }
-        catch { /* close modal, ignore error */ }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed to close LinkedIn modal (non-critical)"); }
+    }
+
+    private async Task CloseModalQuicklyAsync(IPage page)
+    {
+        try
+        {
+            // Fast close — no human delays, just dismiss immediately
+            var dismissSel = await page.WaitForAnySelectorAsync(LinkedInSelectors.DismissButton, 500);
+            if (dismissSel is not null)
+            {
+                await page.EvaluateAsync(@"(selector) => {
+                    const btn = document.querySelector(selector);
+                    if (btn) btn.click();
+                }", dismissSel);
+
+                // Brief wait for discard dialog if it appears
+                var discardSel = await page.WaitForAnySelectorAsync(LinkedInSelectors.DiscardButton, 500);
+                if (discardSel is not null)
+                {
+                    await page.EvaluateAsync(@"(selector) => {
+                        const btn = document.querySelector(selector);
+                        if (btn) btn.click();
+                    }", discardSel);
+                }
+            }
+        }
+        catch { /* ignore close errors */ }
     }
 
 }

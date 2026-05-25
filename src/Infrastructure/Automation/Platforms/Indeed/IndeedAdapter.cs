@@ -18,13 +18,6 @@ public sealed class IndeedAdapter : IPlatformAdapter
     private readonly HumanBehavior _behavior;
     private readonly ILogger<IndeedAdapter> _logger;
 
-    private static readonly string[] PaginationSelectors =
-    [
-        "a[data-testid=\"pagination-page-next\"]",
-        ".np[aria-label=\"Next Page\"]",
-        "nav[aria-label=\"pagination\"] a:last-child"
-    ];
-
     private static readonly Dictionary<string, string> DatePostedMap = new()
     {
         ["Past 24 Hours"] = "1",
@@ -51,30 +44,9 @@ public sealed class IndeedAdapter : IPlatformAdapter
     public async Task<AuthCheckResult> IsAuthenticatedAsync(IBrowserPage page)
     {
         var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
-        try
-        {
-            var modalLocator = innerPage
-                .Locator("#privacy-gdpr, .fc-consent-root, [class*=\"cookie\"]")
-                .First;
-            await modalLocator.WaitForAsync(new() { Timeout = 2000 });
-            var hasBlockingModal = await modalLocator.IsVisibleAsync();
 
-            if (hasBlockingModal)
-            {
-                var dismissBtn = innerPage.Locator("button:has-text(\"Accept\"), button:has-text(\"Accept all\"), button:has-text(\"Permitir\")").First;
-                await dismissBtn.WaitForAsync(new() { Timeout = 1000 });
-                var dismissVisible = await dismissBtn.IsVisibleAsync();
-                if (dismissVisible)
-                {
-                    await dismissBtn.ClickAsync();
-                    await Task.Delay(1000);
-                }
-            }
-        }
-        catch { /* dismiss cookie modal, ignore error */ }
+        await DismissCookieConsentModalAsync(innerPage);
 
-        // Indeed allows browsing jobs without authentication, but may redirect
-        // to login page (secure.indeed.com/auth) when the apply flow requires it.
         var currentUrl = innerPage.Url;
         if (currentUrl.Contains("secure.indeed.com/auth") || currentUrl.Contains("/auth"))
         {
@@ -87,6 +59,32 @@ public sealed class IndeedAdapter : IPlatformAdapter
         }
 
         return new AuthCheckResult { IsAuthenticated = true };
+    }
+
+    private async Task DismissCookieConsentModalAsync(IPage page)
+    {
+        try
+        {
+            var modalLocator = page
+                .Locator("#privacy-gdpr, .fc-consent-root, [class*=\"cookie\"]")
+                .First;
+            await modalLocator.WaitForAsync(new() { Timeout = 2000 });
+
+            if (!await modalLocator.IsVisibleAsync()) return;
+
+            var dismissBtn = page.Locator("button:has-text(\"Accept\"), button:has-text(\"Accept all\"), button:has-text(\"Permitir\")").First;
+            await dismissBtn.WaitForAsync(new() { Timeout = 1000 });
+
+            if (await dismissBtn.IsVisibleAsync())
+            {
+                await dismissBtn.ClickAsync();
+                await Task.Delay(1000);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Cookie consent modal dismissal failed (non-critical)");
+        }
     }
 
     public string BuildSearchUrl(SearchProfile profile, int pageNum = 1)
@@ -154,42 +152,6 @@ public sealed class IndeedAdapter : IPlatformAdapter
     {
         var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         return await _extractor.ExtractJobCardsAsync(innerPage);
-    }
-
-    public async Task<bool> HasNextPageAsync(IBrowserPage page)
-    {
-        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
-        foreach (var sel in PaginationSelectors)
-        {
-            try
-            {
-                var visible = await innerPage.Locator(sel).First.IsVisibleAsync();
-                if (visible) return true;
-            }
-            catch { /* try next */ }
-        }
-        return false;
-    }
-
-    public async Task GoToNextPageAsync(IBrowserPage page)
-    {
-        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
-        foreach (var sel in PaginationSelectors)
-        {
-            try
-            {
-                var visible = await innerPage.Locator(sel).First.IsVisibleAsync();
-                if (visible)
-                {
-                    await _behavior.HumanClickAsync(innerPage, sel);
-                    await innerPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-                    await _behavior.DelayAsync(2000, 4000);
-                    return;
-                }
-            }
-            catch { /* try next */ }
-        }
-        _logger.LogWarning("Could not find next page button on Indeed");
     }
 
     public async Task NavigateToPageAsync(IBrowserPage page, SearchProfile profile, int pageNum)

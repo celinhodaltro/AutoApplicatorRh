@@ -1,7 +1,6 @@
 @using AutoApplicator.Application.Interfaces
 @using Microsoft.Extensions.Logging
-@inject IAutomationStateService AutomationService
-@inject ILogger<TopBar> Logger
+
 
 <div class="topbar">
     <div class="topbar-left">
@@ -55,13 +54,13 @@
     <div class="topbar-right">
         @if (AutomationService.IsRunning)
         {
-            <RadzenButton ButtonStyle="ButtonStyle.Danger" Click="@(() => StopAutomation())">
+            <RadzenButton ButtonStyle="ButtonStyle.Danger" Click="@StopAutomation">
                 <RadzenIcon Icon="stop" /> Stop
             </RadzenButton>
         }
         else
         {
-            <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@(async () => await StartAutomation())">
+            <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@StartAutomation">
                 @switch (_mode)
                 {
                     case AutomationMode.Search:
@@ -82,45 +81,3 @@
         <NotificationBell />
     </div>
 </div>
-
-@code {
-    [Parameter] public EventCallback OnToggleSidebar { get; set; }
-
-    private AutomationMode _mode = AutomationMode.Search;
-    private bool _subscribed;
-
-    protected override void OnInitialized()
-    {
-        if (!_subscribed)
-        {
-            AutomationService.StatusChanged += OnAutomationStatusChanged;
-            _subscribed = true;
-        }
-    }
-
-    private async void OnAutomationStatusChanged()
-    {
-        try { await InvokeAsync(StateHasChanged); }
-        catch (Exception ex) { Logger.LogDebug(ex, "StateHasChanged failed on status change"); }
-    }
-
-    private async Task StartAutomation()
-    {
-        var globalEasyApply = Preferences.Get("global_easy_apply", false);
-        await Task.Run(() => AutomationService.StartAsync(_mode, globalEasyApply));
-    }
-
-    private void StopAutomation()
-    {
-        AutomationService.Stop();
-    }
-
-    public void Dispose()
-    {
-        if (_subscribed)
-        {
-            AutomationService.StatusChanged -= OnAutomationStatusChanged;
-            _subscribed = false;
-        }
-    }
-}

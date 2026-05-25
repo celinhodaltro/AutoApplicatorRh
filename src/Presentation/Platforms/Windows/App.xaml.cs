@@ -1,4 +1,5 @@
-﻿using Microsoft.UI;
+﻿using Microsoft.Maui.Handlers;
+using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using WinRT.Interop;
 
@@ -10,12 +11,12 @@ public partial class App : MauiWinUIApplication
     {
         InitializeComponent();
 
-        Microsoft.Maui.Handlers.WindowHandler.Mapper.AppendToMapping(nameof(IWindow), (handler, view) =>
+        WindowHandler.Mapper!.AppendToMapping(nameof(IWindow), (handler, view) =>
         {
-            var nativeWindow = handler.PlatformView;
-            var hWnd = WindowNative.GetWindowHandle(nativeWindow);
-            var windowId = Win32Interop.GetWindowIdFromWindow(hWnd);
-            var appWindow = AppWindow.GetFromWindowId(windowId);
+            Microsoft.UI.Xaml.Window nativeWindow = handler.PlatformView;
+            nint hWnd = WindowNative.GetWindowHandle(nativeWindow);
+            WindowId windowId = Win32Interop.GetWindowIdFromWindow(hWnd);
+            AppWindow appWindow = AppWindow.GetFromWindowId(windowId);
 
             if (appWindow.Presenter is OverlappedPresenter presenter)
             {

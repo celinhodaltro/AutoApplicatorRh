@@ -48,39 +48,12 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
         {
             _logger.LogInformation("Initializing Playwright with persistent context at {UserDataDir}", UserDataDir);
 
-            _playwright = await Microsoft.Playwright.Playwright.CreateAsync();
-
-            _context = await _playwright.Chromium.LaunchPersistentContextAsync(UserDataDir, new()
-            {
-                Headless = false,
-                Args =
-                [
-                    "--start-maximized",
-                    "--no-sandbox",
-                    "--disable-gpu",
-                    "--disable-dev-shm-usage",
-                    "--disable-features=IsolateOrigins,site-per-process",
-                    "--disable-features=BlockInsecurePrivateNetworkRequests",
-                    "--window-size=1920,1080"
-                ],
-                BypassCSP = true,  // Gupy precisa para carregar scripts
-                Locale = "pt-BR",
-                TimezoneId = "America/Sao_Paulo",
-                UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-            });
-
-            var pages = _context.Pages;
-            _page = pages.Count > 0 ? pages[0] : await _context.NewPageAsync();
-
-            await _context.AddInitScriptAsync(GetAntiDetectionScript());
-
-            _page.SetDefaultTimeout(DefaultTimeout);
-            _page.SetDefaultNavigationTimeout(DefaultTimeout);
-
-            _initialized = true;
-
+            await LaunchBrowserWithPersistentContextAsync();
+            await SelectOrCreateInitialPageAsync();
+            await InjectAntiDetectionScriptsAsync();
             await RestoreCookiesAsync();
 
+            _initialized = true;
             _logger.LogInformation("Playwright initialized successfully");
         }
         catch (Exception ex)
@@ -89,6 +62,44 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
             await CleanupAsync();
             throw;
         }
+    }
+
+    private async Task LaunchBrowserWithPersistentContextAsync()
+    {
+        _playwright = await Microsoft.Playwright.Playwright.CreateAsync();
+
+        _context = await _playwright.Chromium.LaunchPersistentContextAsync(UserDataDir, new()
+        {
+            Headless = false,
+            Args =
+            [
+                "--start-maximized",
+                "--no-sandbox",
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--disable-features=BlockInsecurePrivateNetworkRequests",
+                "--window-size=1920,1080"
+            ],
+            BypassCSP = true,
+            Locale = "pt-BR",
+            TimezoneId = "America/Sao_Paulo",
+            UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        });
+    }
+
+    private async Task SelectOrCreateInitialPageAsync()
+    {
+        var pages = _context!.Pages;
+        _page = pages.Count > 0 ? pages[0] : await _context.NewPageAsync();
+
+        _page.SetDefaultTimeout(DefaultTimeout);
+        _page.SetDefaultNavigationTimeout(DefaultTimeout);
+    }
+
+    private async Task InjectAntiDetectionScriptsAsync()
+    {
+        await _context!.AddInitScriptAsync(GetAntiDetectionScript());
     }
 
     public async Task NavigateAsync(string url)
@@ -282,7 +293,7 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
         }
     }
 
-    private async Task FullReinitializeAsync()
+    private async Task RestartBrowserCompletelyAsync()
     {
         _logger.LogInformation("Starting full Playwright reinitialization...");
         await CleanupAsync();
@@ -326,7 +337,7 @@ public sealed class PlaywrightService : IPlaywrightService, IAsyncDisposable
                     _logger.LogWarning(ex,
                         "PlaywrightException on attempt {Attempt}/{MaxRetries}. Reinitializing and retrying in {Delay}ms...",
                         attempt, maxRetries, delay);
-                    await FullReinitializeAsync();
+                    await RestartBrowserCompletelyAsync();
                     await Task.Delay(delay);
                 }
                 else

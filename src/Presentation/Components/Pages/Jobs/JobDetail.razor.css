@@ -1,0 +1,66 @@
+.back-button {
+    margin-bottom: 16px;
+}
+
+.job-company {
+    color: var(--rz-text-secondary);
+    margin-bottom: 16px;
+}
+
+.badges-row {
+    display: flex;
+    gap: 12px;
+    margin: 16px 0;
+    flex-wrap: wrap;
+}
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 24px 0;
+}
+
+.fieldset-grid {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    gap: 8px;
+}
+
+.fieldset-label {
+    font-weight: 500;
+}
+
+.skills-wrapper {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.fieldset-section {
+    margin: 16px 0;
+}
+
+.text-pre-wrap {
+    white-space: pre-wrap;
+}
+
+.description-text {
+    white-space: pre-wrap;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.red-flag-text {
+    color: var(--rz-danger);
+}
+
+.highlight-text {
+    color: var(--rz-success);
+}
+
+.action-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 24px;
+}

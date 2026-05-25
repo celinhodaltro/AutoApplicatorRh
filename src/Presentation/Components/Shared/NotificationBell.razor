@@ -35,7 +35,7 @@
                             <div class="item-content">
                                 <div class="item-title">@notification.Title</div>
                                 <div class="item-message">@notification.Message</div>
-                                <div class="item-time">@FormatTime(notification.Timestamp)</div>
+                                <div class="item-time">@FormatNotificationTimestamp(notification.Timestamp)</div>
                             </div>
                             @if (!string.IsNullOrEmpty(notification.ActionLabel) && !string.IsNullOrEmpty(notification.ActionUrl))
                             {

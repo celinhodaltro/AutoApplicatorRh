@@ -1,3 +1,68 @@
+.settings-page-title {
+    margin-bottom: 24px;
+}
+
+.tab-panel {
+    padding: 16px;
+}
+
+.login-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.login-tip {
+    color: var(--rz-text-tertiary);
+    margin-top: 8px;
+}
+
+.automation-settings {
+    max-width: 500px;
+}
+
+.toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.toggle-label {
+    font-weight: 600;
+}
+
+.hint-text {
+    color: var(--rz-text-tertiary);
+}
+
+.card-heading {
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.limit-label {
+    flex: 1;
+}
+
+.limit-input {
+    width: 100px;
+}
+
+.limit-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    font-size: 13px;
+}
+
+.save-settings-btn {
+    margin-top: 16px;
+}
+
 .settings-card {
     background: white;
     border: 1px solid #e8e8e8;

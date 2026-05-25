@@ -33,10 +33,7 @@ public sealed class GupyAdapter : IPlatformAdapter
         var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         try
         {
-            // Use QuerySelectorAsync which checks DOM presence, NOT visibility
-            var loginBtn = await innerPage.QuerySelectorAsync("button:has-text(\"Entrar\"), button[data-testid=\"header-login-button\"], button#button-login");
-
-            if (loginBtn is not null)
+            if (await IsLoginButtonPresentInDomAsync(innerPage))
             {
                 return new AuthCheckResult
                 {
@@ -46,9 +43,18 @@ public sealed class GupyAdapter : IPlatformAdapter
                 };
             }
         }
-        catch { /* element not found in DOM = user is logged in */ }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Login element check failed — assuming user is logged in");
+        }
 
         return new AuthCheckResult { IsAuthenticated = true };
+    }
+
+    private static async Task<bool> IsLoginButtonPresentInDomAsync(IPage page)
+    {
+        var loginBtn = await page.QuerySelectorAsync("button:has-text(\"Entrar\"), button[data-testid=\"header-login-button\"], button#button-login");
+        return loginBtn is not null;
     }
 
     public string BuildSearchUrl(SearchProfile profile, int pageNum = 1)
@@ -61,64 +67,6 @@ public sealed class GupyAdapter : IPlatformAdapter
     {
         var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
         return await _extractor.ExtractJobCardsAsync(innerPage);
-    }
-
-    public async Task<bool> HasNextPageAsync(IBrowserPage page)
-    {
-        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
-        try
-        {
-            var nextBtn = await innerPage.QuerySelectorAsync(GupySelectors.NextPageButton);
-            if (nextBtn is not null)
-            {
-                var isDisabled = await nextBtn.GetAttributeAsync("aria-disabled");
-                if (isDisabled == "true") return false;
-
-                var classAttr = await nextBtn.GetAttributeAsync("class");
-                if (classAttr is not null && classAttr.Contains("disabled", StringComparison.OrdinalIgnoreCase))
-                    return false;
-
-                return true;
-            }
-
-            // Fallback: if we have job cards, assume there might be more pages
-            var jobCards = await innerPage.QuerySelectorAllAsync(GupySelectors.JobCardSelector);
-            if (jobCards.Count >= 20)
-            {
-                // Check if there's a visible pagination element
-                var pagination = await innerPage.QuerySelectorAsync("[aria-label=\"Página\"]");
-                return pagination is not null;
-            }
-
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to check for next Gupy page");
-            return false;
-        }
-    }
-
-    public async Task GoToNextPageAsync(IBrowserPage page)
-    {
-        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
-        try
-        {
-            var nextBtn = await innerPage.QuerySelectorAsync(GupySelectors.NextPageButton);
-            if (nextBtn is not null)
-            {
-                await nextBtn.ClickAsync();
-                await innerPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-                await _behavior.DelayAsync(2000, 3000);
-                return;
-            }
-
-            _logger.LogWarning("Next page button not found");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to go to next Gupy page");
-        }
     }
 
     public async Task NavigateToPageAsync(IBrowserPage page, SearchProfile profile, int pageNum)

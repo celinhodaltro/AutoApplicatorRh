@@ -73,7 +73,7 @@
                         <td class="col-check">
                             <label class="checkbox-label">
                                 <input type="checkbox" checked="@_selectedIds.Contains(job.Id)"
-                                    @onchange="@((ChangeEventArgs e) => ToggleSelection(job.Id, (bool)(e.Value ?? false)))" class="checkbox-input" />
+                                    @onchange="@((ChangeEventArgs e) => ToggleJobSelection(job.Id, (bool)(e.Value ?? false)))" class="checkbox-input" />
                                 <span class="checkbox-custom"></span>
                             </label>
                         </td>
@@ -105,8 +105,8 @@
                                 <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Base" Click="@(() => Navigation.NavigateTo($"/jobs/{job.Id}"))" title="View details"><RadzenIcon Icon="visibility" /></RadzenButton>
                                 @if (job.Status == "New")
                                 {
-                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Success" Click="@(() => ApproveSingle(job.Id))" title="Approve"><RadzenIcon Icon="check_circle" /></RadzenButton>
-                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Warning" Click="@(() => RejectSingle(job.Id))" title="Reject"><RadzenIcon Icon="cancel" /></RadzenButton>
+                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Success" Click="@(() => ApproveSingleJob(job.Id))" title="Approve"><RadzenIcon Icon="check_circle" /></RadzenButton>
+                                    <RadzenButton Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Warning" Click="@(() => RejectSingleJob(job.Id))" title="Reject"><RadzenIcon Icon="cancel" /></RadzenButton>
                                 }
                             </div>
                         </td>

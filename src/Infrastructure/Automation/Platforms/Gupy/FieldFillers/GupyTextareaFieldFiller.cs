@@ -65,24 +65,22 @@ public sealed class GupyTextareaFieldFiller : IFieldFiller
 
     public async Task FillAsync(IPage page, FormField field, string answer)
     {
+        if (string.IsNullOrEmpty(field.ElementId)) return;
+
+        var selector = $"#{CssSelectorHelper.EscapeCssId(field.ElementId)}";
+
         try
         {
-            if (!string.IsNullOrEmpty(field.ElementId))
+            var isDisabled = await page.Locator(selector).GetAttributeAsync("disabled");
+            if (isDisabled is not null)
             {
-                var selector = $"#{CssSelectorHelper.EscapeCssId(field.ElementId)}";
-                await page.Locator(selector).FillAsync(answer);
-                _logger.LogInformation("GupyTextareaFieldFiller: Filled '{Label}' with '{Answer}'", field.Label, answer);
-            }
-            else
-            {
-                _logger.LogWarning("GupyTextareaFieldFiller: ElementId is empty for field '{Label}', cannot fill", field.Label);
+                // Field is disabled (pre-filled by platform). Skip.
+                return;
             }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "GupyTextareaFieldFiller.FillAsync failed for field '{Label}'", field.Label);
-            throw;
-        }
+        catch { }
+
+        await page.Locator(selector).FillAsync(answer);
     }
 
     public Task<bool> CanHandleAsync(ILocator element) => Task.FromResult(false);

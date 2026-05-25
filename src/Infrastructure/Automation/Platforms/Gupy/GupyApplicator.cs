@@ -50,68 +50,84 @@ public sealed class GupyApplicator : IJobApplicator
 
         try
         {
-            // 1. Navigate to job URL
-            _logger.LogInformation("[{Title}] Navigating to Gupy job page...", job.Title);
-            await page.GotoAsync(job.Url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-            await _behavior.DelayAsync(2000, 3000);
+            await NavigateToJobUrlAsync(page, job);
+            if (HasLoginRedirect(page, job, out var loginResult)) return loginResult;
 
-            // 2. Check for login redirect
-            if (page.Url.Contains(GupySelectors.LoginPageIndicator))
-            {
-                _logger.LogWarning("[{Title}] Gupy login required. Please log in first.", job.Title);
-                return new ApplyResult(false, "Gupy login required. Please log in first.", true);
-            }
-
-            // 3. Scroll to find "Candidatar-se" button
-            await page.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight)");
-            await _behavior.DelayAsync(1000, 1500);
-
-            // 4. Click "Candidatar-se" button
-            var applyBtn = await page.QuerySelectorAsync(GupySelectors.ApplyButton);
-            if (applyBtn is null)
-            {
-                _logger.LogWarning("[{Title}] Apply button not found", job.Title);
+            await ScrollToApplyButtonAsync(page);
+            if (await TryClickApplyButtonAsync(page, job) is false)
                 return new ApplyResult(false, "Apply button not found");
-            }
 
-            await applyBtn.ClickAsync();
-            await _behavior.DelayAsync(3000, 4000);
+            if (HasLoginRedirect(page, job, out var postClickLoginResult)) return postClickLoginResult;
 
-            // 5. Check for login redirect again (after click)
-            if (page.Url.Contains(GupySelectors.LoginPageIndicator))
-            {
-                _logger.LogWarning("[{Title}] Gupy login required after clicking apply.", job.Title);
-                return new ApplyResult(false, "Gupy login required. Please log in first.", true);
-            }
-
-            // 6. Fill form fields step by step
-            var maxSteps = 10;
-            for (var step = 0; step < maxSteps; step++)
-            {
-                var hasUnansweredRequired = await ProcessFormStepAsync(page, job, step);
-                if (hasUnansweredRequired)
-                {
-                    _logger.LogInformation("[{Title}] ⏭️ Skipping — configure answers in Questions tab", job.Title);
-                    return new ApplyResult(false, "Pending questions need configuration", true);
-                }
-
-                await _behavior.DelayAsync(500, 1000);
-
-                // Try to submit / advance
-                var submitResult = await HandleSubmitAsync(page, job);
-                if (submitResult is not null)
-                    return submitResult;
-
-                await _behavior.DelayAsync(1000, 2000);
-            }
-
-            return new ApplyResult(false, $"Exceeded maximum steps ({maxSteps})");
+            return await FillFormStepsAsync(page, job);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[{Title}] Gupy application failed", job.Title);
             return new ApplyResult(false, ex.Message);
         }
+    }
+
+    private async Task NavigateToJobUrlAsync(IPage page, JobListing job)
+    {
+        _logger.LogInformation("[{Title}] Navigating to Gupy job page...", job.Title);
+        await page.GotoAsync(job.Url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await _behavior.DelayAsync(2000, 3000);
+    }
+
+    private static bool HasLoginRedirect(IPage page, JobListing job, out ApplyResult result)
+    {
+        if (page.Url.Contains(GupySelectors.LoginPageIndicator))
+        {
+            result = new ApplyResult(false, "Gupy login required. Please log in first.", true);
+            return true;
+        }
+        result = null!;
+        return false;
+    }
+
+    private async Task ScrollToApplyButtonAsync(IPage page)
+    {
+        await page.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight)");
+        await _behavior.DelayAsync(1000, 1500);
+    }
+
+    private async Task<bool> TryClickApplyButtonAsync(IPage page, JobListing job)
+    {
+        var applyBtn = await page.QuerySelectorAsync(GupySelectors.ApplyButton);
+        if (applyBtn is null)
+        {
+            _logger.LogWarning("[{Title}] Apply button not found", job.Title);
+            return false;
+        }
+
+        await applyBtn.ClickAsync();
+        await _behavior.DelayAsync(3000, 4000);
+        return true;
+    }
+
+    private async Task<ApplyResult> FillFormStepsAsync(IPage page, JobListing job)
+    {
+        var maxSteps = 10;
+        for (var step = 0; step < maxSteps; step++)
+        {
+            var hasUnansweredRequired = await ProcessFormStepAsync(page, job, step);
+            if (hasUnansweredRequired)
+            {
+                _logger.LogInformation("[{Title}] ⏭️ Skipping — configure answers in Questions tab", job.Title);
+                return new ApplyResult(false, "Pending questions need configuration", true);
+            }
+
+            await _behavior.DelayAsync(500, 1000);
+
+            var submitResult = await HandleSubmitAsync(page, job);
+            if (submitResult is not null)
+                return submitResult;
+
+            await _behavior.DelayAsync(1000, 2000);
+        }
+
+        return new ApplyResult(false, $"Exceeded maximum steps ({maxSteps})");
     }
 
     private async Task<bool> ProcessFormStepAsync(IPage page, JobListing job, int step)
@@ -148,13 +164,9 @@ public sealed class GupyApplicator : IJobApplicator
     {
         var fields = new List<FormField>();
 
-        // Use the modal/container for Gupy form fields
         var formRoot = page.Locator("form, [data-testid=\"apply-form\"], .curriculum-content, .sc-hOynoF").First;
         if (!await formRoot.IsVisibleAsync())
-        {
-            // Fallback: use body as form root
             formRoot = page.Locator("body").First;
-        }
 
         foreach (var filler in _fieldFillers)
         {
@@ -169,7 +181,6 @@ public sealed class GupyApplicator : IJobApplicator
     {
         _logger.LogInformation("[{Title}] Filling field \"{Field}\"", job.Title, field.Label);
 
-        // Check for saved answer
         var existing = await _mediator.Send(new FindQuestionByTextQuery(field.Label));
 
         if (existing is not null && !string.IsNullOrEmpty(existing.Answer))
@@ -186,7 +197,6 @@ public sealed class GupyApplicator : IJobApplicator
             return false;
         }
 
-        // New question: save it for later configuration
         var questionFieldType = field.Type switch
         {
             FormFieldType.Radio => QuestionFieldType.Radio,
@@ -221,7 +231,7 @@ public sealed class GupyApplicator : IJobApplicator
         }
     }
 
-    private async Task<bool> ClickWithFallbackAsync(IPage page, IElementHandle element, string title)
+    private async Task<bool> TryClickWithFallbackStrategiesAsync(IPage page, IElementHandle element, string title)
     {
         bool clicked = false;
         try
@@ -265,8 +275,29 @@ public sealed class GupyApplicator : IJobApplicator
 
     private async Task<ApplyResult?> HandleSubmitAsync(IPage page, JobListing job)
     {
-        // Step 1: Try to find submit/continue button and click it
-        bool hasSubmitBtn = true;
+        var hasSubmitBtn = await TryClickSubmitButtonAsync(page, job);
+
+        await TryClickFinishApplicationButtonAsync(page, job);
+
+        var successResult = await TryDetectSubmissionSuccessAsync(page, job);
+        if (successResult is not null)
+            return successResult;
+
+        if (hasSubmitBtn)
+        {
+            var nextSubmit = await page.QuerySelectorAsync(GupySelectors.SubmitButton);
+            if (nextSubmit is not null)
+            {
+                _logger.LogInformation("[{Title}] More steps to go...", job.Title);
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<bool> TryClickSubmitButtonAsync(IPage page, JobListing job)
+    {
         var submitBtn = await page.QuerySelectorAsync(GupySelectors.SubmitButton)
                     ?? await page.QuerySelectorAsync(GupySelectors.ContinueButton)
                     ?? await page.QuerySelectorAsync(GupySelectors.ResponderAgoraButton);
@@ -274,15 +305,16 @@ public sealed class GupyApplicator : IJobApplicator
         if (submitBtn is not null)
         {
             _logger.LogInformation("[{Title}] Clicking submit/continue...", job.Title);
-            await ClickWithFallbackAsync(page, submitBtn, job.Title);
+            await TryClickWithFallbackStrategiesAsync(page, submitBtn, job.Title);
             await _behavior.DelayAsync(1000, 1500);
-        }
-        else
-        {
-            hasSubmitBtn = false;
+            return true;
         }
 
-        // Step 2: Check for "Finalizar candidatura" button directly (faster than checking modal)
+        return false;
+    }
+
+    private async Task TryClickFinishApplicationButtonAsync(IPage page, JobListing job)
+    {
         try
         {
             var finalizarBtn = page.Locator("button:has-text(\"Finalizar candidatura\"), button#dialog-give-up-personalization-step").First;
@@ -293,14 +325,23 @@ public sealed class GupyApplicator : IJobApplicator
                 _logger.LogInformation("[{Title}] 'Finalizar candidatura' detected! Clicking...", job.Title);
 
                 try { await finalizarBtn.ClickAsync(); }
-                catch { try { await finalizarBtn.ClickAsync(new() { Force = true }); } catch { } }
+                catch (Exception innerEx)
+                {
+                    _logger.LogDebug(innerEx, "Normal click failed, trying Force click");
+                    await finalizarBtn.ClickAsync(new() { Force = true });
+                }
 
-                await Task.Delay(1000); // reduced from 2000-3000
+                await Task.Delay(1000);
             }
         }
-        catch { /* no finalizar button yet */ }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[{Title}] 'Finalizar candidatura' button not yet available", job.Title);
+        }
+    }
 
-        // Step 3: Check for success confirmation "Candidatura finalizada!"
+    private async Task<ApplyResult?> TryDetectSubmissionSuccessAsync(IPage page, JobListing job)
+    {
         try
         {
             var successTitle = page.Locator(GupySelectors.ApplicationSuccessTitle).First;
@@ -311,18 +352,7 @@ public sealed class GupyApplicator : IJobApplicator
                 return new ApplyResult(true, "Application submitted", false, _answersUsed);
             }
         }
-        catch { }
-
-        // Step 4: If there are more form fields or submit button, continue
-        if (hasSubmitBtn)
-        {
-            var nextSubmit = await page.QuerySelectorAsync(GupySelectors.SubmitButton);
-            if (nextSubmit is not null)
-            {
-                _logger.LogInformation("[{Title}] More steps to go...", job.Title);
-                return null;
-            }
-        }
+        catch (Exception ex) { _logger.LogDebug(ex, "[{Title}] Success confirmation not yet visible", job.Title); }
 
         return null;
     }

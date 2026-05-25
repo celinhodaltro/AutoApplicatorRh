@@ -58,54 +58,56 @@ public sealed class JobApplyService
 
         await _playwrightService.InitializeAsync();
 
-        UpdateStatus($"Applying to up to {Math.Min(jobsToApply.Count, maxJobs)} job(s) in parallel...", 0, jobsToApply.Count);
-
         var limit = Math.Min(jobsToApply.Count, maxJobs);
         var jobsToProcess = jobsToApply.Take(limit).ToList();
 
-        var appliedCount = 0;
-        var pendingCount = 0;
-        var errorCount = 0;
-        var processedCount = 0;
+        UpdateStatus($"Applying to up to {limit} job(s) in parallel...", 0, jobsToProcess.Count);
 
-        var tasks = jobsToProcess.Select(job =>
-            Task.Run(async () =>
-            {
-                IBrowserPage? applyPage = null;
-                try
-                {
-                    applyPage = await _playwrightService.CreateNewPageAsync();
+        var results = await Task.WhenAll(
+            jobsToProcess.Select(job => RunSingleJobApplicationAsync(job, token)));
 
-                    var result = await ProcessJobApplicationAsync(applyPage, job, token);
-                    await UpdateJobAfterApplyAsync(job, result, token);
-
-                    if (result.Success) Interlocked.Increment(ref appliedCount);
-                    else if (result.NeedsManualIntervention) Interlocked.Increment(ref pendingCount);
-                    else Interlocked.Increment(ref errorCount);
-
-                    var current = Interlocked.Increment(ref processedCount);
-                    UpdateStatus($"Applying: {job.Title} ({current}/{jobsToProcess.Count})", current, jobsToProcess.Count);
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    Interlocked.Increment(ref errorCount);
-                    _logger.LogError(ex, "Error applying to '{Title}'", job.Title);
-                }
-                finally
-                {
-                    if (applyPage is not null)
-                    {
-                        try { await applyPage.CloseAsync(); } catch { /* ignore */ }
-                    }
-                }
-            }, token));
-
-        await Task.WhenAll(tasks);
+        var appliedCount = results.Count(r => r.Success);
+        var pendingCount = results.Count(r => r.NeedsManualIntervention);
+        var errorCount = results.Count(r => !r.Success && !r.NeedsManualIntervention);
 
         _logger.LogInformation("Apply complete: {Applied} applied, {Pending} pending, {Errors} errors, {Total} total",
             appliedCount, pendingCount, errorCount, jobsToProcess.Count);
 
+        NotifyApplyResults(appliedCount, pendingCount);
+    }
+
+    private async Task<ApplyResult> RunSingleJobApplicationAsync(JobListing job, CancellationToken token)
+    {
+        IBrowserPage? applyPage = null;
+        try
+        {
+            applyPage = await _playwrightService.CreateNewPageAsync();
+
+            var result = await ProcessJobApplicationAsync(applyPage, job, token);
+            await UpdateJobAfterApplyAsync(job, result, token);
+
+            return result;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error applying to '{Title}'", job.Title);
+            return new ApplyResult(false, ex.Message);
+        }
+        finally
+        {
+            if (applyPage is not null)
+            {
+                try { await applyPage.CloseAsync(); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to close apply page for '{Title}'", job.Title); }
+            }
+        }
+    }
+
+
+
+    private void NotifyApplyResults(int appliedCount, int pendingCount)
+    {
         if (appliedCount > 0)
             _notifications.Add(NotificationType.Success, "Apply Complete", $"Applied to {appliedCount} job(s).", "View Jobs", "/jobs");
         if (pendingCount > 0)

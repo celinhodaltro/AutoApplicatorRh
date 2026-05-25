@@ -44,9 +44,7 @@ public static class DependencyInjection
         services.AddScoped<IJobApplicator, LinkedInApplicator>();
         services.AddScoped<IJobApplicator, GupyApplicator>();
         services.AddSingleton<ExceptionHandlerService>();
-        services.AddSingleton<LinkedInDedupService>();
         services.AddSingleton<IHumanBehavior, HumanBehavior>();
-        services.AddScoped<LinkedInPaginator>();
 
         // Gupy Field Fillers
         services.AddScoped<IFieldFiller, GupyRadioFieldFiller>();
@@ -57,9 +55,6 @@ public static class DependencyInjection
 
         // GupyExtractor
         services.AddScoped<GupyExtractor>();
-
-        // GupyPaginator
-        services.AddScoped<GupyPaginator>();
 
         // GupyAdapter
         services.AddScoped<GupyAdapter>();

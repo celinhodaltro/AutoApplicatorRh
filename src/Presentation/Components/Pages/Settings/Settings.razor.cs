@@ -1,4 +1,8 @@
-﻿using AutoApplicator.Domain.Enums;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading.Tasks;
+using AutoApplicator.Domain.Enums;
 
 namespace AutoApplicator.App.Components.Pages.Settings;
 
@@ -39,7 +43,6 @@ public partial class Settings
         }
         catch
         {
-            // Preferences not available (e.g., during testing)
         }
     }
 
@@ -57,10 +60,12 @@ public partial class Settings
             Preferences.Set("max_apply_jobs", _unlimitedApply ? 9999 : _maxApplyJobs);
             Preferences.Set("max_full_jobs", _unlimitedFull ? 9999 : _maxFullJobs);
         }
-        catch { /* Preferences save failed */ }
+        catch
+        {
+        }
     }
 
-    private void OpenLogin(PlatformType platform)
+    private void OpenPlatformLoginUrl(PlatformType platform)
     {
         var url = platform switch
         {
@@ -80,10 +85,12 @@ public partial class Settings
             };
             System.Diagnostics.Process.Start(psi);
         }
-        catch { /* Failed to open browser */ }
+        catch
+        {
+        }
     }
 
-    private async Task OpenLoginInBrowser(PlatformType platform)
+    private async Task OpenPlatformLoginViaPlaywright(PlatformType platform)
     {
         var url = platform switch
         {
@@ -96,7 +103,7 @@ public partial class Settings
         await BrowserLogin.OpenLoginPageAsync(url);
     }
 
-    private void OpenLogsFolder()
+    private void OpenLogsDirectoryInExplorer()
     {
         var logDir = Path.Combine(FileSystem.AppDataDirectory, "Logs");
         if (Directory.Exists(logDir))
@@ -111,11 +118,11 @@ public partial class Settings
         }
     }
 
-    private string GetLogLineClass(string line)
+    private static string GetLogLineClass(string line) => line switch
     {
-        if (line.Contains("[ERR]") || line.Contains("[FTL]")) return "color:#f44747;";
-        if (line.Contains("[WRN]")) return "color:#dcdcaa;";
-        if (line.Contains("[INF]")) return "color:#6a9955;";
-        return "";
-    }
+        _ when line.Contains("[ERR]") || line.Contains("[FTL]") => "color:#f44747;",
+        _ when line.Contains("[WRN]") => "color:#dcdcaa;",
+        _ when line.Contains("[INF]") => "color:#6a9955;",
+        _ => ""
+    };
 }

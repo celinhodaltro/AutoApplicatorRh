@@ -5,7 +5,7 @@
             <div class="toast-header">
                 <span class="toast-icon"><RadzenIcon Icon="@GetIcon(toast.Type)" /></span>
                 <strong class="toast-title">@toast.Title</strong>
-                <button class="toast-close" @onclick="() => RemoveToast(toast.Id)">✕</button>
+                <button class="toast-close" @onclick="() => RemoveToastFromPanel(toast.Id)">✕</button>
             </div>
             <div class="toast-message">@toast.Message</div>
             @if (!string.IsNullOrEmpty(toast.ActionLabel) && !string.IsNullOrEmpty(toast.ActionUrl))

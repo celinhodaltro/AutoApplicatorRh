@@ -164,7 +164,7 @@ public sealed class IndeedExtractor
                 }
             }
         }
-        catch { /* try next selector */ }
+        catch (Exception ex) { _logger.LogDebug(ex, "Card URL extraction failed"); }
 
         return $"https://br.indeed.com/viewjob?jk={jobKey}";
     }
@@ -192,7 +192,7 @@ public sealed class IndeedExtractor
                 if (badgeText.Contains("quick") || badgeText.Contains("apply") || badgeText.Contains("rápida"))
                     return true;
             }
-            catch { /* try next */ }
+            catch (Exception ex) { _logger.LogDebug(ex, "Easy Apply quick selector check failed for '{Selector}'", sel); }
         }
 
         return false;
@@ -204,10 +204,7 @@ public sealed class IndeedExtractor
 
         var description = await QuickTextAsync(page, DetailDescriptionSelectors);
         if (string.IsNullOrEmpty(description))
-        {
-            _logger.LogInformation("Known selectors failed for Indeed description, trying fallback");
-            description = await FallbackExtractDescriptionAsync(page);
-        }
+            description = await TryFallbackDescriptionExtractionAsync(page);
 
         string? salary = null;
         foreach (var sel in DetailSalarySelectors)
@@ -226,7 +223,7 @@ public sealed class IndeedExtractor
                 }
                 if (salary is not null) break;
             }
-            catch { /* try next */ }
+            catch (Exception ex) { _logger.LogDebug(ex, "Salary extraction failed via selector '{Selector}'", sel); }
         }
 
         string? title = null;
@@ -236,7 +233,7 @@ public sealed class IndeedExtractor
             if (titleEl is not null)
                 title = ((await titleEl.InnerTextAsync()) ?? string.Empty).Trim();
         }
-        catch { /* try next selector */ }
+        catch (Exception ex) { _logger.LogDebug(ex, "Title extraction failed"); }
 
         return new JobDetail
         {
@@ -246,7 +243,7 @@ public sealed class IndeedExtractor
         };
     }
 
-    private static async Task<string> GetFirstVisibleTextAsync(IElementHandle parent, string[] selectors)
+    private async Task<string> GetFirstVisibleTextAsync(IElementHandle parent, string[] selectors)
     {
         foreach (var sel in selectors)
         {
@@ -257,12 +254,12 @@ public sealed class IndeedExtractor
                 var text = (await el.InnerTextAsync())?.Trim();
                 if (!string.IsNullOrEmpty(text)) return text;
             }
-            catch { /* try next */ }
+            catch (Exception ex) { _logger.LogDebug(ex, "Visibility text extraction failed for '{Selector}'", sel); }
         }
         return string.Empty;
     }
 
-    private static async Task<string> QuickTextAsync(IPage page, string[] selectors)
+    private async Task<string> QuickTextAsync(IPage page, string[] selectors)
     {
         foreach (var sel in selectors)
         {
@@ -271,12 +268,12 @@ public sealed class IndeedExtractor
                 var text = await page.Locator(sel).First.InnerTextAsync(new() { Timeout = 1500 });
                 if (!string.IsNullOrEmpty(text?.Trim())) return text.Trim();
             }
-            catch { /* try next */ }
+            catch (Exception ex) { _logger.LogDebug(ex, "Quick text extraction failed for '{Selector}'", sel); }
         }
         return string.Empty;
     }
 
-    private async Task<string> FallbackExtractDescriptionAsync(IPage page)
+    private async Task<string> TryFallbackDescriptionExtractionAsync(IPage page)
     {
         try
         {
@@ -300,7 +297,7 @@ public sealed class IndeedExtractor
         }
     }
 
-    private static async Task<string?> ExtractJobKeyFromLinkAsync(IElementHandle el)
+    private async Task<string?> ExtractJobKeyFromLinkAsync(IElementHandle el)
     {
         try
         {
@@ -317,7 +314,7 @@ public sealed class IndeedExtractor
                 if (vjMatch.Success) return vjMatch.Groups[1].Value;
             }
         }
-        catch { /* try next selector */ }
+        catch (Exception ex) { _logger.LogDebug(ex, "Job key extraction from link failed"); }
         return null;
     }
 

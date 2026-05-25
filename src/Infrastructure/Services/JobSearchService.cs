@@ -7,6 +7,7 @@ using AutoApplicator.Infrastructure.Automation.Platforms;
 using AutoApplicator.Infrastructure.Services.Exceptions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Playwright;
 
 namespace AutoApplicator.Infrastructure.Services;
 
@@ -87,7 +88,8 @@ public sealed class JobSearchService
                 }
                 finally
                 {
-                    try { await profilePage.CloseAsync(); } catch { /* ignore */ }
+                    try { await profilePage.CloseAsync(); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Failed to close profile page for '{Profile}'", profile.Name); }
                 }
             }, token));
 
@@ -122,109 +124,26 @@ public sealed class JobSearchService
             var searchUrl = await NavigateToSearchUrlAsync(adapter, profile, page, token);
             await WaitForLoginAsync(adapter, page, profile, token);
 
-            var extractedJobs = await adapter.ExtractListingsAsync(page);
+            // Fase 1: Collect all jobs from all pages quickly (card-level only, no details)
+            var allJobs = await CollectAllJobsFromAllPagesAsync(adapter, page, profile, maxJobs, globalEasyApply, token);
 
-            _logger.LogInformation("[Profile: {Name}] Extracted {Total} jobs on {Platform}", profile.Name, extractedJobs.Count, profile.Platform);
-
-            using var scope = _scopeFactory.CreateScope();
-            var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
-
-            var savedCount = 0;
-            var limit = Math.Min(extractedJobs.Count, maxJobs);
-            for (var i = 0; i < limit; i++)
+            if (allJobs.Count == 0)
             {
-                if (token.IsCancellationRequested) break;
-
-                var extracted = extractedJobs[i];
-
-                var isEasyApply = extracted.EasyApply;
-
-                if (globalEasyApply && !isEasyApply)
-                {
-                    _logger.LogInformation("[Profile: {Name}] Skipping non-Easy-Apply: '{Title}'", profile.Name, extracted.Title);
-                    continue;
-                }
-
-                var (details, updatedExtracted) = await FetchJobDetailsAsync(page, adapter, extracted, searchUrl, token);
-                extracted = updatedExtracted;
-
-                _logger.LogInformation("[Profile: {Name}] Saving job: '{Title}' at {Company} | EasyApply: {EasyApply} | Desc: {DescLen} chars",
-                    profile.Name, extracted.Title, extracted.Company, isEasyApply, details?.Description?.Length ?? 0);
-
-                UpdateProfileStatus(profile.Name, "Saving jobs...");
-                await SaveJobAsync(jobRepo, extracted, details, profile, isEasyApply);
-                savedCount++;
+                _logger.LogInformation("[Profile: {Name}] No jobs found", profile.Name);
+                UpdateProfileStatus(profile.Name, "Complete");
+                return 0;
             }
 
-            // Pagination: navigate to next pages using direct URL navigation
-            var pageNum = 1;
-            var totalExtracted = savedCount;
+            _logger.LogInformation("[Profile: {Name}] Collected {Total} job(s) from all pages", profile.Name, allJobs.Count);
 
-            while (!token.IsCancellationRequested && totalExtracted < maxJobs)
-            {
-                pageNum++;
-                _logger.LogInformation("[Profile: {Name}] Page {PageNum}: URL = {Url}", profile.Name, pageNum, adapter.BuildSearchUrl(profile, pageNum));
+            // Fase 2: Save all jobs in batch (without details)
+            UpdateProfileStatus(profile.Name, "Saving jobs...");
+            await SaveJobsBatchAsync(allJobs, profile);
 
-                await adapter.NavigateToPageAsync(page, profile, pageNum);
-                await Task.Delay(2000, token);
-
-                var moreJobs = await adapter.ExtractListingsAsync(page);
-                _logger.LogInformation("[Profile: {Name}] Page {PageNum}: found {Count} job(s)", profile.Name, pageNum, moreJobs.Count);
-
-                if (moreJobs.Count == 0)
-                {
-                    _logger.LogInformation("[Profile: {Name}] No results on page {PageNum}, ending pagination", profile.Name, pageNum);
-                    break;
-                }
-
-                var remaining = maxJobs - totalExtracted;
-                var jobsToProcess = Math.Min(moreJobs.Count, remaining);
-
-                for (var k = 0; k < jobsToProcess; k++)
-                {
-                    if (token.IsCancellationRequested) break;
-
-                    var extracted = moreJobs[k];
-
-                    var isEasyApply = extracted.EasyApply;
-
-                    if (globalEasyApply && !isEasyApply)
-                    {
-                        _logger.LogInformation("[Profile: {Name}] Skipping non-Easy-Apply: '{Title}'", profile.Name, extracted.Title);
-                        continue;
-                    }
-
-                    var (details, updatedExtracted) = await FetchJobDetailsAsync(page, adapter, extracted, searchUrl, token);
-                    extracted = updatedExtracted;
-
-                    _logger.LogInformation("[Profile: {Name}] Saving job: '{Title}' at {Company} | EasyApply: {EasyApply} | Desc: {DescLen} chars",
-                        profile.Name, extracted.Title, extracted.Company, isEasyApply, details?.Description?.Length ?? 0);
-
-                    UpdateProfileStatus(profile.Name, "Saving jobs...");
-                    await SaveJobAsync(jobRepo, extracted, details, profile, isEasyApply);
-                    totalExtracted++;
-                }
-
-                if (totalExtracted >= maxJobs)
-                {
-                    _logger.LogInformation("[Profile: {Name}] Reached max jobs limit ({MaxJobs}) on page {PageNum}", profile.Name, maxJobs, pageNum);
-                    break;
-                }
-
-                if (moreJobs.Count < 25)
-                {
-                    _logger.LogInformation("[Profile: {Name}] Less than 25 results on page {PageNum}, assuming last page", profile.Name, pageNum);
-                    break;
-                }
-            }
-
-            _logger.LogInformation("[Profile: {Name}] Finished pagination: extracted {Total} job(s) across {Pages} page(s)",
-                profile.Name, totalExtracted, pageNum);
-
-            _logger.LogInformation("[Profile: {Name}] Saved {Count} job(s)", profile.Name, savedCount);
+            _logger.LogInformation("[Profile: {Name}] Saved {Count} job(s)", profile.Name, allJobs.Count);
 
             UpdateProfileStatus(profile.Name, "Complete");
-            return savedCount;
+            return allJobs.Count;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -232,6 +151,86 @@ public sealed class JobSearchService
             _logger.LogError(ex, "[Profile: {Name}] Failed", profile.Name);
             _notifications.Add(NotificationType.Error, $"{profile.Platform} Error", $"{profile.Name}: {ex.Message}");
             return 0;
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    //  Fase 1: Collect all jobs from all pages (card-level only, no details)
+    // ──────────────────────────────────────────────
+
+    internal async Task<List<ExtractedJob>> CollectAllJobsFromAllPagesAsync(
+        IPlatformAdapter adapter, IBrowserPage page, SearchProfile profile,
+        int maxJobs, bool globalEasyApply, CancellationToken token)
+    {
+        var allJobs = new List<ExtractedJob>();
+        var pageNum = 1;
+
+        while (!token.IsCancellationRequested && allJobs.Count < maxJobs)
+        {
+            if (pageNum == 1)
+            {
+                // Page 1: navigate with DOMContentLoaded (faster than fixed 3s delay)
+                var searchUrl = adapter.BuildSearchUrl(profile);
+                var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
+                await innerPage.GotoAsync(searchUrl, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+            }
+            else
+            {
+                await adapter.NavigateToPageAsync(page, profile, pageNum);
+                await Task.Delay(1500, token);
+            }
+
+            var jobs = await adapter.ExtractListingsAsync(page);
+
+            if (globalEasyApply)
+                jobs = jobs.Where(j => j.EasyApply).ToList();
+
+            _logger.LogInformation("[Profile: {Name}] Page {PageNum}: collected {Count} jobs. Total: {Total}",
+                profile.Name, pageNum, jobs.Count, allJobs.Count);
+
+            allJobs.AddRange(jobs);
+
+            if (jobs.Count == 0 || jobs.Count < 25)
+                break;
+
+            pageNum++;
+        }
+
+        return allJobs;
+    }
+
+    // ──────────────────────────────────────────────
+    //  Fase 2: Save jobs in batch (without details)
+    // ──────────────────────────────────────────────
+
+    private async Task SaveJobsBatchAsync(List<ExtractedJob> jobs, SearchProfile profile)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
+
+        foreach (var extracted in jobs)
+        {
+            var job = new JobListing
+            {
+                Id = Guid.NewGuid(),
+                ExternalId = extracted.ExternalId,
+                Platform = profile.Platform,
+                ProfileId = profile.Id,
+                Url = extracted.Url,
+                Title = extracted.Title,
+                Company = extracted.Company,
+                Location = extracted.Location,
+                Description = string.Empty,
+                Salary = null,
+                JobType = string.Join(", ", profile.JobTypes),
+                PostedDate = DateTime.UtcNow,
+                EasyApply = extracted.EasyApply,
+                Status = JobStatus.New,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await jobRepo.AddAsync(job, default);
         }
     }
 
@@ -258,12 +257,15 @@ public sealed class JobSearchService
         if (auth.IsAuthenticated)
             return;
 
-        const int checkIntervalMs = 2000;
-        const int notifyIntervalMs = 60_000;
-
         var platformName = profile.Platform.ToString();
         var loginUrl = auth.LoginUrl;
 
+        await NotifyLoginRequiredAndNavigateAsync(page, platformName, loginUrl);
+        await PollForLoginCompletionAsync(adapter, page, platformName, loginUrl, token);
+    }
+
+    private async Task NotifyLoginRequiredAndNavigateAsync(IBrowserPage page, string platformName, string loginUrl)
+    {
         _notifications.Add(NotificationType.Warning,
             $"{platformName} Login Required",
             $"Login required for {platformName}. Please log in in the browser window.",
@@ -274,28 +276,32 @@ public sealed class JobSearchService
         _logger.LogWarning("Login required for {Platform}. Navigated to login URL: {LoginUrl}", platformName, loginUrl);
 
         await page.GoToAsync(loginUrl);
+    }
+
+    private async Task PollForLoginCompletionAsync(
+        IPlatformAdapter adapter, IBrowserPage page, string platformName, string loginUrl, CancellationToken token)
+    {
+        const int CheckIntervalMs = 2000;
+        const int NotifyIntervalMs = 60_000;
 
         var lastNotifyTime = DateTime.UtcNow;
-
         await Task.Delay(5000, CancellationToken.None);
+
         while (!token.IsCancellationRequested)
         {
-            auth = await adapter.IsAuthenticatedAsync(page);
+            var auth = await adapter.IsAuthenticatedAsync(page);
 
             if (auth.IsAuthenticated)
             {
                 await _playwrightService.SaveCookiesAsync();
 
-                _notifications.Add(NotificationType.Success,
-                    $"{platformName} Login",
-                    "Login successful! Continuing automation...");
-
+                _notifications.Add(NotificationType.Success, $"{platformName} Login", "Login successful! Continuing automation...");
                 UpdateStatus($"{platformName} login OK!", 0, 0);
                 _logger.LogInformation("Login detected for {Platform}. Continuing automation.", platformName);
                 return;
             }
 
-            if ((DateTime.UtcNow - lastNotifyTime).TotalMilliseconds >= notifyIntervalMs)
+            if ((DateTime.UtcNow - lastNotifyTime).TotalMilliseconds >= NotifyIntervalMs)
             {
                 _notifications.Add(NotificationType.Warning,
                     $"{platformName} Login Required",
@@ -306,7 +312,7 @@ public sealed class JobSearchService
                 lastNotifyTime = DateTime.UtcNow;
             }
 
-            await Task.Delay(checkIntervalMs, CancellationToken.None);
+            await Task.Delay(CheckIntervalMs, CancellationToken.None);
         }
     }
 
@@ -335,9 +341,9 @@ public sealed class JobSearchService
             await page.GoToAsync(searchUrl);
             await Task.Delay(2000, token);
         }
-        catch
+        catch (Exception ex)
         {
-            _logger.LogWarning("Failed to navigate back to search results");
+            _logger.LogWarning(ex, "Failed to navigate back to search results");
         }
 
         return (details, extracted);

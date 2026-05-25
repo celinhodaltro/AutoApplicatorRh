@@ -13,8 +13,6 @@ public interface IPlatformAdapter
     Task<AuthCheckResult> IsAuthenticatedAsync(IBrowserPage page);
     string BuildSearchUrl(SearchProfile profile, int pageNum = 1);
     Task<List<ExtractedJob>> ExtractListingsAsync(IBrowserPage page);
-    Task<bool> HasNextPageAsync(IBrowserPage page);
-    Task GoToNextPageAsync(IBrowserPage page);
     Task NavigateToPageAsync(IBrowserPage page, SearchProfile profile, int pageNum);
     Task<JobDetail> ExtractJobDetailsAsync(IBrowserPage page, string url);
 }

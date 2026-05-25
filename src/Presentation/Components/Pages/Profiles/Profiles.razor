@@ -7,125 +7,41 @@
 @using AutoApplicator.Application.Commands.Profiles
 @using AutoApplicator.Domain.Enums
 @using AutoApplicator.Domain.Entities
-@inject IMediator Mediator
-@inject DialogService DialogService
-@inject ProfileListViewModel ViewModel
 
-<RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 24px;">Search Profiles</RadzenText>
 
-<div style="margin-bottom: 16px;">
-    <RadzenButton Text="New Profile" ButtonStyle="ButtonStyle.Primary" Click="@OpenNew" />
+<RadzenText TextStyle="TextStyle.H4" class="page-title">Search Profiles</RadzenText>
+
+<div class="toolbar">
+    <RadzenButton Text="New Profile" ButtonStyle="ButtonStyle.Primary" Click="@OpenNewProfileForm" />
 </div>
 
-<div style="overflow-x: auto;">
-    <table style="width: 100%; border-collapse: collapse;">
+<div class="table-wrapper">
+    <table class="profiles-table">
         <thead>
-            <tr style="border-bottom: 2px solid var(--rz-grid-border); text-align: left;">
-                <th style="padding: 8px 12px; font-weight: 600;">Name</th>
-                <th style="padding: 8px 12px; font-weight: 600;">Platform</th>
-                <th style="padding: 8px 12px; font-weight: 600;">Keywords</th>
-                <th style="padding: 8px 12px; font-weight: 600;">Active</th>
-                <th style="padding: 8px 12px; font-weight: 600;">Actions</th>
+            <tr>
+                <th>Name</th>
+                <th>Platform</th>
+                <th>Keywords</th>
+                <th>Active</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody>
             @foreach (var profile in ViewModel.Profiles)
             {
-                <tr style="border-bottom: 1px solid var(--rz-grid-border);">
-                    <td style="padding: 8px 12px;">@profile.Name</td>
-                    <td style="padding: 8px 12px;">@profile.Platform</td>
-                    <td style="padding: 8px 12px;">@string.Join(", ", profile.Keywords.Take(3))@(profile.Keywords.Count > 3 ? "..." : "")</td>
-                    <td style="padding: 8px 12px;">
-                        <RadzenSwitch Value="@profile.Enabled" Change="@((bool val) => ToggleEnabled(profile, val))" />
+                <tr>
+                    <td>@profile.Name</td>
+                    <td>@profile.Platform</td>
+                    <td>@string.Join(", ", profile.Keywords.Take(3))@(profile.Keywords.Count > 3 ? "..." : "")</td>
+                    <td>
+                        <RadzenSwitch Value="@profile.Enabled" Change="@((bool val) => ToggleProfileEnabled(profile, val))" />
                     </td>
-                    <td style="padding: 8px 12px; display: flex; gap: 4px;">
-                        <RadzenButton Text="Edit" ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" Click="@(() => OpenEdit(profile))" />
-                        <RadzenButton Text="Delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small" Click="@(() => ConfirmDelete(profile))" />
+                    <td class="actions-cell">
+                        <RadzenButton Text="Edit" ButtonStyle="ButtonStyle.Secondary" Size="ButtonSize.Small" Click="@(() => OpenEditProfileForm(profile))" />
+                        <RadzenButton Text="Delete" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small" Click="@(() => ConfirmDeleteProfile(profile))" />
                     </td>
                 </tr>
             }
         </tbody>
     </table>
 </div>
-
-@code {
-    protected override async Task OnInitializedAsync()
-    {
-        await ViewModel.LoadProfilesAsync();
-    }
-
-    private async Task OpenNew()
-    {
-        var profile = new SearchProfile
-        {
-            Id = Guid.NewGuid(),
-            Name = "",
-            Enabled = true,
-            Keywords = [],
-            Location = [],
-            ExperienceLevel = [],
-            JobTypes = [],
-            ExcludeTerms = [],
-        };
-
-        var result = await DialogService.OpenAsync<ProfileEditDialog>(
-            "New Profile",
-            new Dictionary<string, object?>
-            {
-                { "Profile", profile },
-                { "IsNew", true }
-            });
-
-        if (result is true)
-        {
-            await ViewModel.LoadProfilesAsync();
-        }
-    }
-
-    private async Task OpenEdit(ProfileDto profileDto)
-    {
-        var profile = await Mediator.Send(new GetProfileByIdQuery(profileDto.Id));
-        if (profile is null) return;
-
-        var result = await DialogService.OpenAsync<ProfileEditDialog>(
-            $"Edit Profile - {profile.Name}",
-            new Dictionary<string, object?>
-            {
-                { "Profile", profile },
-                { "IsNew", false }
-            });
-
-        if (result is true)
-        {
-            await ViewModel.LoadProfilesAsync();
-        }
-    }
-
-    private async Task ToggleEnabled(ProfileDto profileDto, bool value)
-    {
-        var profile = await Mediator.Send(new GetProfileByIdQuery(profileDto.Id));
-        if (profile is null) return;
-
-        profile.Enabled = value;
-        profile.UpdatedAt = DateTime.UtcNow;
-        await Mediator.Send(new SaveProfileCommand(profile, false));
-        await ViewModel.LoadProfilesAsync();
-    }
-
-    private async Task ConfirmDelete(ProfileDto profileDto)
-    {
-        var confirmed = await DialogService.Confirm(
-            $"Are you sure you want to delete profile \"{profileDto.Name}\"?",
-            "Confirm Delete",
-            new ConfirmOptions
-            {
-                OkButtonText = "Delete",
-                CancelButtonText = "Cancel"
-            });
-
-        if (confirmed == true)
-        {
-            await ViewModel.DeleteProfileAsync(profileDto.Id);
-        }
-    }
-}

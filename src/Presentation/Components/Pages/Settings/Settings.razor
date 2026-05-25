@@ -4,87 +4,83 @@
 @using AutoApplicator.Infrastructure.Services
 @inject BrowserLoginService BrowserLogin
 
-<RadzenText TextStyle="TextStyle.H4" style="margin-bottom: 24px;">Settings</RadzenText>
+<RadzenText TextStyle="TextStyle.H4" class="settings-page-title">Settings</RadzenText>
 
 <RadzenTabs>
     <Tabs>
         <RadzenTabsItem Text="Accounts">
-            <div style="padding: 16px;">
+            <div class="tab-panel">
                 <RadzenText TextStyle="TextStyle.Body2">Log in to each platform.</RadzenText>
-                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
-                    <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@(() => OpenLogin(PlatformType.LinkedIn))"><RadzenIcon Icon="vpn_key" /> LinkedIn Login</RadzenButton>
-                    <RadzenButton ButtonStyle="ButtonStyle.Info" Click="@(() => OpenLogin(PlatformType.Indeed))"><RadzenIcon Icon="vpn_key" /> Indeed Login</RadzenButton>
-                    <RadzenButton ButtonStyle="ButtonStyle.Secondary" Click="@(() => OpenLogin(PlatformType.Gupy))"><RadzenIcon Icon="vpn_key" /> Gupy Login</RadzenButton>
-                    <RadzenButton ButtonStyle="ButtonStyle.Warning" Click="@(() => OpenLoginInBrowser(PlatformType.Gupy))">
+                <div class="login-buttons">
+                    <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@(() => OpenPlatformLoginUrl(PlatformType.LinkedIn))"><RadzenIcon Icon="vpn_key" /> LinkedIn Login</RadzenButton>
+                    <RadzenButton ButtonStyle="ButtonStyle.Info" Click="@(() => OpenPlatformLoginUrl(PlatformType.Indeed))"><RadzenIcon Icon="vpn_key" /> Indeed Login</RadzenButton>
+                    <RadzenButton ButtonStyle="ButtonStyle.Secondary" Click="@(() => OpenPlatformLoginUrl(PlatformType.Gupy))"><RadzenIcon Icon="vpn_key" /> Gupy Login</RadzenButton>
+                    <RadzenButton ButtonStyle="ButtonStyle.Warning" Click="@(() => OpenPlatformLoginViaPlaywright(PlatformType.Gupy))">
                         <RadzenIcon Icon="open_in_browser" /> Gupy Login via Playwright
                     </RadzenButton>
-                    <RadzenText TextStyle="TextStyle.Caption" style="color: var(--rz-text-tertiary); margin-top:8px;">
+                    <RadzenText TextStyle="TextStyle.Caption" class="login-tip">
                         💡 Use "Login via Playwright" para que a automação reconheça sua sessão. Faça o login na janela do navegador que abrir e depois feche-a.
                     </RadzenText>
                 </div>
             </div>
         </RadzenTabsItem>
         <RadzenTabsItem Text="Automation">
-            <div style="max-width: 500px;">
+            <div class="automation-settings">
 
-                @* Easy Apply Only Toggle *@
                 <div class="settings-card">
-                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
+                    <div class="toggle-row">
                         <RadzenSwitch @bind-Value="@_globalEasyApply" />
-                        <span style="font-weight:600;">Easy Apply only</span>
+                        <span class="toggle-label">Easy Apply only</span>
                     </div>
-                    <RadzenText TextStyle="TextStyle.Caption" style="color:var(--rz-text-tertiary);">
+                    <RadzenText TextStyle="TextStyle.Caption" class="hint-text">
                         When enabled, only jobs with Easy Apply will be processed
                     </RadzenText>
                 </div>
 
-                @* Search limits *@
                 <div class="settings-card">
-                    <div style="font-weight:600; margin-bottom:8px;">🔍 Search</div>
+                    <div class="card-heading">🔍 Search</div>
                     <div class="limit-row">
-                        <RadzenText TextStyle="TextStyle.Body2" style="flex:1;">Max jobs to search:</RadzenText>
-                        <RadzenNumeric @bind-Value="@_maxSearchJobs" Min="0" Max="500" Step="5" style="width:100px;" Disabled="@_unlimitedSearch" />
-                        <label style="display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; font-size:13px;">
+                        <RadzenText TextStyle="TextStyle.Body2" class="limit-label">Max jobs to search:</RadzenText>
+                        <RadzenNumeric @bind-Value="@_maxSearchJobs" Min="0" Max="500" Step="5" class="limit-input" Disabled="@_unlimitedSearch" />
+                        <label class="limit-checkbox">
                             <RadzenCheckBox @bind-Value="@_unlimitedSearch" />
                             <span>∞ No limit</span>
                         </label>
                     </div>
                 </div>
 
-                @* Apply limits *@
                 <div class="settings-card">
-                    <div style="font-weight:600; margin-bottom:8px;">📤 Apply</div>
+                    <div class="card-heading">📤 Apply</div>
                     <div class="limit-row">
-                        <RadzenText TextStyle="TextStyle.Body2" style="flex:1;">Max jobs to apply:</RadzenText>
-                        <RadzenNumeric @bind-Value="@_maxApplyJobs" Min="0" Max="500" Step="5" style="width:100px;" Disabled="@_unlimitedApply" />
-                        <label style="display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; font-size:13px;">
+                        <RadzenText TextStyle="TextStyle.Body2" class="limit-label">Max jobs to apply:</RadzenText>
+                        <RadzenNumeric @bind-Value="@_maxApplyJobs" Min="0" Max="500" Step="5" class="limit-input" Disabled="@_unlimitedApply" />
+                        <label class="limit-checkbox">
                             <RadzenCheckBox @bind-Value="@_unlimitedApply" />
                             <span>∞ No limit</span>
                         </label>
                     </div>
                 </div>
 
-                @* Full Auto limits *@
                 <div class="settings-card">
-                    <div style="font-weight:600; margin-bottom:8px;">⚡ Full Auto</div>
+                    <div class="card-heading">⚡ Full Auto</div>
                     <div class="limit-row">
-                        <RadzenText TextStyle="TextStyle.Body2" style="flex:1;">Max jobs (Full):</RadzenText>
-                        <RadzenNumeric @bind-Value="@_maxFullJobs" Min="0" Max="500" Step="5" style="width:100px;" Disabled="@_unlimitedFull" />
-                        <label style="display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; font-size:13px;">
+                        <RadzenText TextStyle="TextStyle.Body2" class="limit-label">Max jobs (Full):</RadzenText>
+                        <RadzenNumeric @bind-Value="@_maxFullJobs" Min="0" Max="500" Step="5" class="limit-input" Disabled="@_unlimitedFull" />
+                        <label class="limit-checkbox">
                             <RadzenCheckBox @bind-Value="@_unlimitedFull" />
                             <span>∞ No limit</span>
                         </label>
                     </div>
                 </div>
 
-                <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@SaveSettings" style="margin-top:16px;">
+                <RadzenButton ButtonStyle="ButtonStyle.Primary" Click="@SaveSettings" class="save-settings-btn">
                     💾 Save Settings
                 </RadzenButton>
             </div>
         </RadzenTabsItem>
         <RadzenTabsItem Text="Logs">
-            <div style="padding: 16px;">
-                <RadzenButton Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Base" Click="@OpenLogsFolder"><RadzenIcon Icon="folder_open" /> Open Folder</RadzenButton>
+            <div class="tab-panel">
+                <RadzenButton Size="ButtonSize.Small" ButtonStyle="ButtonStyle.Base" Click="@OpenLogsDirectoryInExplorer"><RadzenIcon Icon="folder_open" /> Open Folder</RadzenButton>
             </div>
         </RadzenTabsItem>
     </Tabs>

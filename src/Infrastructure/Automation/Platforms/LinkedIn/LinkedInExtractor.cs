@@ -27,89 +27,116 @@ public sealed class LinkedInExtractor
         var cards = new List<ExtractedJob>();
         var extractedIds = new HashSet<string>();
 
-        IReadOnlyList<IElementHandle> cardElements = [];
+        var cardElements = await FindJobCardElementsAsync(page);
+        await ParseVisibleCardsAsync(cardElements, cards, extractedIds);
+
+        var allJobIds = await GetAllJobIdsAsync(page);
+        await ExtractOccludedCardsAsync(page, allJobIds, extractedIds, cards);
+
+        _logger.LogInformation("Extracted {Count} LinkedIn cards", cards.Count);
+        return cards;
+    }
+
+    private async Task<IReadOnlyList<IElementHandle>> FindJobCardElementsAsync(IPage page)
+    {
         foreach (var sel in LinkedInSelectors.JobCardSelectors)
         {
-            cardElements = await page.QuerySelectorAllAsync(sel);
+            var cardElements = await page.QuerySelectorAllAsync(sel);
             if (cardElements.Count > 0)
             {
                 _logger.LogInformation("Found {Count} job cards using: {Selector}", cardElements.Count, sel);
-                break;
+                return cardElements;
             }
         }
+        return [];
+    }
 
+    private async Task ParseVisibleCardsAsync(
+        IReadOnlyList<IElementHandle> cardElements, List<ExtractedJob> cards, HashSet<string> extractedIds)
+    {
         foreach (var el in cardElements)
         {
             try
             {
-                var card = await ExtractSingleCardAsync(page, el);
+                var card = await ExtractSingleCardAsync(el);
                 if (card is not null && extractedIds.Add(card.ExternalId))
-                {
                     cards.Add(card);
-                }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to extract LinkedIn card");
             }
         }
+    }
 
-        var allJobIds = await page.EvaluateAsync<string[]>(@"
+    private static async Task<string[]> GetAllJobIdsAsync(IPage page)
+    {
+        return await page.EvaluateAsync<string[]>(@"
             Array.from(document.querySelectorAll('li[data-occludable-job-id]'))
                 .map(el => el.getAttribute('data-occludable-job-id'))
                 .filter(Boolean)
         ").ConfigureAwait(false);
-
-        var missingIds = allJobIds.Where(id => !extractedIds.Contains(id)).ToList();
-        if (missingIds.Count > 0)
-        {
-            _logger.LogInformation("{Count} occluded items, scrolling to extract", missingIds.Count);
-
-            foreach (var id in missingIds)
-            {
-                try
-                {
-                    await page.EvaluateAsync(@"(jobId) => {
-                        const el = document.querySelector(`li[data-occludable-job-id=""${jobId}""]`);
-                        if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
-                    }", id);
-
-                    await _behavior.DelayAsync(250, 450);
-
-                    var el = await page.QuerySelectorAsync($"li[data-occludable-job-id=\"{id}\"]");
-                    if (el is null) continue;
-
-                    var card = await ExtractSingleCardAsync(page, el);
-                    if (card is not null)
-                    {
-                        cards.Add(card);
-                        extractedIds.Add(card.ExternalId);
-                    }
-                    else
-                    {
-                        cards.Add(new ExtractedJob
-                        {
-                            ExternalId = id,
-                            Title = string.Empty,
-                            Company = string.Empty,
-                            Location = string.Empty,
-                            Url = $"https://www.linkedin.com/jobs/view/{id}/",
-                            EasyApply = false
-                        });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to extract occluded card {Id}", id);
-                }
-            }
-        }
-
-        _logger.LogInformation("Extracted {Count} LinkedIn cards", cards.Count);
-        return cards;
     }
 
-    private async Task<ExtractedJob?> ExtractSingleCardAsync(IPage page, IElementHandle el)
+    private async Task ExtractOccludedCardsAsync(
+        IPage page, string[] allJobIds, HashSet<string> extractedIds, List<ExtractedJob> cards)
+    {
+        var missingIds = allJobIds.Where(id => !extractedIds.Contains(id)).ToList();
+        if (missingIds.Count == 0) return;
+
+        _logger.LogInformation("{Count} occluded items, scrolling to extract", missingIds.Count);
+
+        foreach (var id in missingIds)
+        {
+            try
+            {
+                await ScrollJobCardIntoViewAsync(page, id);
+
+                var el = await page.QuerySelectorAsync($"li[data-occludable-job-id=\"{id}\"]");
+                if (el is null) continue;
+
+                var card = await ExtractSingleCardAsync(el);
+                if (card is not null)
+                {
+                    cards.Add(card);
+                    extractedIds.Add(card.ExternalId);
+                }
+                else
+                {
+                    cards.Add(CreateEmptyJobEntry(id));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to extract occluded card {Id}", id);
+            }
+        }
+    }
+
+    private async Task ScrollJobCardIntoViewAsync(IPage page, string jobId)
+    {
+        await page.EvaluateAsync(@"(jobId) => {
+            const el = document.querySelector(`li[data-occludable-job-id=""${jobId}""]`);
+            if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
+        }", jobId);
+
+        await _behavior.DelayAsync(250, 450);
+    }
+
+    private static ExtractedJob CreateEmptyJobEntry(string jobId)
+    {
+        return new ExtractedJob
+        {
+            ExternalId = jobId,
+            Title = string.Empty,
+            Company = string.Empty,
+            Location = string.Empty,
+            Url = $"https://www.linkedin.com/jobs/view/{jobId}/",
+            EasyApply = false
+        };
+    }
+
+    private async Task<ExtractedJob?> ExtractSingleCardAsync(IElementHandle el)
     {
         var jobId = await el.GetAttributeAsync("data-occludable-job-id")
                  ?? await el.GetAttributeAsync("data-job-id")
@@ -137,7 +164,7 @@ public sealed class LinkedInExtractor
                     break;
                 }
             }
-            catch { /* try next */ }
+            catch (Exception ex) { _logger.LogDebug(ex, "URL extraction failed via selector '{Selector}'", sel); }
         }
 
         var cardText = ((await el.InnerTextAsync()) ?? string.Empty).ToLowerInvariant();
@@ -215,7 +242,7 @@ public sealed class LinkedInExtractor
                         return text;
                 }
             }
-            catch { /* try next */ }
+            catch (Exception ex) { _logger.LogDebug(ex, "Salary extraction failed via selector '{Selector}'", sel); }
         }
 
         try
@@ -226,12 +253,12 @@ public sealed class LinkedInExtractor
                 return match ? match[0] : null;
             ");
         }
-        catch { /* try next fallback */ return null; }
+        catch (Exception ex) { _logger.LogDebug(ex, "Salary fallback regex extraction failed"); return null; }
     }
 
 
 
-    private static async Task<string?> ExtractJobIdFromHrefAsync(IElementHandle el)
+    private async Task<string?> ExtractJobIdFromHrefAsync(IElementHandle el)
     {
         try
         {
@@ -248,7 +275,7 @@ public sealed class LinkedInExtractor
                 if (paramMatch.Success) return paramMatch.Groups[1].Value;
             }
         }
-        catch { /* try next link */ }
+        catch (Exception ex) { _logger.LogDebug(ex, "Job ID extraction from href failed"); }
         return null;
     }
 }

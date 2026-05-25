@@ -2,7 +2,6 @@ using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
 using AutoApplicator.Infrastructure.Automation.Abstractions;
-using AutoApplicator.Infrastructure.Automation.Common;
 using AutoApplicator.Infrastructure.Automation.Models;
 using AutoApplicator.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
@@ -42,7 +41,7 @@ public sealed class LinkedInAdapter : IPlatformAdapter
                 if (visible)
                     return new AuthCheckResult { IsAuthenticated = true };
             }
-            catch { /* try next selector */ }
+            catch (Exception ex) { _logger.LogDebug(ex, "Auth selector '{Selector}' not found", sel); }
         }
 
         var url = innerPage.Url;
@@ -62,9 +61,9 @@ public sealed class LinkedInAdapter : IPlatformAdapter
                     Message = signIn ? "LinkedIn: please log in first" : ""
                 };
             }
-            catch
+            catch (Exception ex)
             {
-                // Sign-in button not found = user IS logged in
+                _logger.LogDebug(ex, "Sign-in button not found — user is likely logged in");
                 return new AuthCheckResult { IsAuthenticated = true };
             }
         }
@@ -79,25 +78,48 @@ public sealed class LinkedInAdapter : IPlatformAdapter
 
     public string BuildSearchUrl(SearchProfile profile, int pageNum = 1)
     {
-        var queryParts = new List<string>();
+        var parameters = new Dictionary<string, string>();
 
+        AppendKeywordParameter(profile, parameters);
+        AppendLocationParameter(profile, parameters);
+        AppendDatePostedParameter(profile, parameters);
+        AppendJobTypeParameter(profile, parameters);
+        AppendExperienceLevelParameter(profile, parameters);
+        AppendRemoteFilter(profile, parameters);
+        AppendSalaryFilter(profile, parameters);
+        AppendEasyApplyFilter(profile, parameters);
+        AppendPaginationParameter(pageNum, parameters);
+
+        var paramString = string.Join("&", parameters.Select(p => $"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value)}"));
+        return $"{BaseUrl}/jobs/search/?{paramString}";
+    }
+
+    private static void AppendKeywordParameter(SearchProfile profile, Dictionary<string, string> parameters)
+    {
+        var queryParts = new List<string>();
         if (profile.Keywords.Count > 0 || profile.ExcludeTerms.Count > 0)
         {
             queryParts.AddRange(profile.Keywords);
             queryParts.AddRange(profile.ExcludeTerms.Select(t => $"-{t}"));
         }
-
-        var parameters = new Dictionary<string, string>();
-
         if (queryParts.Count > 0)
             parameters["keywords"] = string.Join(" ", queryParts);
+    }
 
+    private static void AppendLocationParameter(SearchProfile profile, Dictionary<string, string> parameters)
+    {
         if (profile.Location.Count > 0)
             parameters["location"] = profile.Location[0];
+    }
 
+    private static void AppendDatePostedParameter(SearchProfile profile, Dictionary<string, string> parameters)
+    {
         if (!string.IsNullOrEmpty(profile.DatePosted) && LinkedInSelectors.DatePostedMap.TryGetValue(profile.DatePosted, out var tpr))
             parameters["f_TPR"] = tpr;
+    }
 
+    private static void AppendJobTypeParameter(SearchProfile profile, Dictionary<string, string> parameters)
+    {
         if (profile.JobTypes.Count > 0)
         {
             var types = profile.JobTypes
@@ -107,7 +129,10 @@ public sealed class LinkedInAdapter : IPlatformAdapter
             if (types.Count > 0)
                 parameters["f_JT"] = string.Join(",", types);
         }
+    }
 
+    private static void AppendExperienceLevelParameter(SearchProfile profile, Dictionary<string, string> parameters)
+    {
         if (profile.ExperienceLevel.Count > 0)
         {
             var levels = profile.ExperienceLevel
@@ -117,29 +142,37 @@ public sealed class LinkedInAdapter : IPlatformAdapter
             if (levels.Count > 0)
                 parameters["f_E"] = string.Join(",", levels);
         }
+    }
 
+    private static void AppendRemoteFilter(SearchProfile profile, Dictionary<string, string> parameters)
+    {
         if (profile.RemoteOnly)
             parameters["f_WT"] = "2";
+    }
 
-        if (profile.SalaryMin.HasValue)
+    private static void AppendSalaryFilter(SearchProfile profile, Dictionary<string, string> parameters)
+    {
+        if (!profile.SalaryMin.HasValue) return;
+
+        var buckets = new[] { 40000, 60000, 80000, 100000, 120000, 140000, 160000, 180000, 200000 };
+        var bucket = Array.FindLast(buckets, b => b <= profile.SalaryMin.Value);
+        if (bucket > 0)
         {
-            var buckets = new[] { 40000, 60000, 80000, 100000, 120000, 140000, 160000, 180000, 200000 };
-            var bucket = Array.FindLast(buckets, b => b <= profile.SalaryMin.Value);
-            if (bucket > 0)
-            {
-                var code = Array.IndexOf(buckets, bucket) + 1;
-                parameters["f_SB2"] = code.ToString();
-            }
+            var code = Array.IndexOf(buckets, bucket) + 1;
+            parameters["f_SB2"] = code.ToString();
         }
+    }
 
+    private static void AppendEasyApplyFilter(SearchProfile profile, Dictionary<string, string> parameters)
+    {
         if (profile.EasyApplyOnly)
             parameters["f_AL"] = "true";
+    }
 
+    private static void AppendPaginationParameter(int pageNum, Dictionary<string, string> parameters)
+    {
         if (pageNum > 1)
             parameters["start"] = ((pageNum - 1) * 25).ToString();
-
-        var paramString = string.Join("&", parameters.Select(p => $"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value)}"));
-        return $"{BaseUrl}/jobs/search/?{paramString}";
     }
 
     public async Task<List<ExtractedJob>> ExtractListingsAsync(IBrowserPage page)
@@ -156,47 +189,6 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         }
 
         return await _extractor.ExtractJobCardsAsync(innerPage);
-    }
-
-    public async Task<bool> HasNextPageAsync(IBrowserPage page)
-    {
-        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
-        foreach (var sel in LinkedInSelectors.PaginationSelectors)
-        {
-            try
-            {
-                var locator = innerPage.Locator(sel).First;
-                var visible = await locator.IsVisibleAsync();
-                if (visible)
-                {
-                    var disabled = await locator.GetAttributeAsync("disabled");
-                    return disabled is null;
-                }
-            }
-            catch { /* try next */ }
-        }
-        return false;
-    }
-
-    public async Task GoToNextPageAsync(IBrowserPage page)
-    {
-        var innerPage = ((PlaywrightPageAdapter)page).InnerPage;
-        foreach (var sel in LinkedInSelectors.PaginationSelectors)
-        {
-            try
-            {
-                var visible = await innerPage.Locator(sel).First.IsVisibleAsync();
-                if (visible)
-                {
-                    await _behavior.HumanClickAsync(innerPage, sel);
-                    await innerPage.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-                    await _behavior.DelayAsync(2000, 4000);
-                    return;
-                }
-            }
-            catch { /* try next */ }
-        }
-        _logger.LogWarning("Could not find next page button on LinkedIn");
     }
 
     public async Task NavigateToPageAsync(IBrowserPage page, SearchProfile profile, int pageNum)
@@ -227,7 +219,7 @@ public sealed class LinkedInAdapter : IPlatformAdapter
                         break;
                     }
                 }
-                catch { }
+                catch (Exception ex) { _logger.LogDebug(ex, "Card selector '{Selector}' check failed", sel); }
             }
             
             if (cardsFound) break;
@@ -237,19 +229,21 @@ public sealed class LinkedInAdapter : IPlatformAdapter
         }
         
         if (!cardsFound)
-        {
             _logger.LogWarning("Page {PageNum}: No job cards found after multiple attempts", pageNum);
-        }
         
-        // Extra scroll to trigger lazy loading
+        await ScrollPageToTriggerLazyLoadingAsync(innerPage);
+    }
+
+    private async Task ScrollPageToTriggerLazyLoadingAsync(IPage page)
+    {
         try
         {
-            await innerPage.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight)");
+            await page.EvaluateAsync("window.scrollTo(0, document.body.scrollHeight)");
             await Task.Delay(1000);
-            await innerPage.EvaluateAsync("window.scrollTo(0, 0)");
+            await page.EvaluateAsync("window.scrollTo(0, 0)");
             await Task.Delay(500);
         }
-        catch { }
+        catch (Exception ex) { _logger.LogDebug(ex, "Lazy loading scroll failed (non-critical)"); }
     }
 
     public async Task<JobDetail> ExtractJobDetailsAsync(IBrowserPage page, string url)

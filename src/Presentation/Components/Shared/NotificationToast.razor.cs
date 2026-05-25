@@ -43,7 +43,7 @@ public partial class NotificationToast : IDisposable
                 var old = _toasts[^1];
                 _toasts.RemoveAt(_toasts.Count - 1);
                 _shownIds.Remove(old.Id);
-                CancelTimer(old.Id);
+                CancelAutoDismissTimer(old.Id);
             }
 
             StateHasChanged();
@@ -59,21 +59,21 @@ public partial class NotificationToast : IDisposable
             try
             {
                 await Task.Delay(5000, cts.Token);
-                await InvokeAsync(() => RemoveToast(id));
+                await InvokeAsync(() => RemoveToastFromPanel(id));
             }
             catch (TaskCanceledException) { }
         });
     }
 
-    private void RemoveToast(Guid id)
+    private void RemoveToastFromPanel(Guid id)
     {
-        CancelTimer(id);
+        CancelAutoDismissTimer(id);
         _shownIds.Remove(id);
         _toasts.RemoveAll(t => t.Id == id);
         StateHasChanged();
     }
 
-    private void CancelTimer(Guid id)
+    private void CancelAutoDismissTimer(Guid id)
     {
         if (_timers.TryGetValue(id, out var cts))
         {

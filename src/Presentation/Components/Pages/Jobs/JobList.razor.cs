@@ -50,17 +50,17 @@ public partial class JobList
         _selectAll = false;
     }
 
-    private async Task ApproveSingle(Guid id)
+    private async Task ApproveSingleJob(Guid id)
     {
         await ViewModel.ApproveJobAsync(id);
     }
 
-    private async Task RejectSingle(Guid id)
+    private async Task RejectSingleJob(Guid id)
     {
         await ViewModel.RejectJobAsync(id);
     }
 
-    private void ToggleSelection(Guid id, bool isSelected)
+    private void ToggleJobSelection(Guid id, bool isSelected)
     {
         if (isSelected) _selectedIds.Add(id);
         else _selectedIds.Remove(id);

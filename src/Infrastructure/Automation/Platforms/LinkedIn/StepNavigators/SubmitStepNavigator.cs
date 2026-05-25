@@ -34,6 +34,9 @@ public sealed class SubmitStepNavigator : IStepNavigator
 
         _logger.LogInformation("Clicking Submit button: {Selector}", selector);
 
+        // SCROLL MODAL FIRST - ensure submit button is visible
+        await ScrollModalToBottomAsync(page);
+
         // Human click with fallback strategy
         try
         {
@@ -64,5 +67,18 @@ public sealed class SubmitStepNavigator : IStepNavigator
 
         _logger.LogInformation("Submit step navigation successful");
         return StepResult.Submit;
+    }
+
+    private static async Task ScrollModalToBottomAsync(IPage page)
+    {
+        await page.EvaluateAsync(@"() => {
+            const modal = document.querySelector(
+                '.jobs-easy-apply-modal, .artdeco-modal');
+            if (!modal) return;
+            const content = modal.querySelector(
+                '.jobs-easy-apply-modal__content, .artdeco-modal__content');
+            if (content) content.scrollTo(0, content.scrollHeight);
+            modal.scrollTo(0, modal.scrollHeight);
+        }");
     }
 }

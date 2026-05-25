@@ -2,6 +2,7 @@ using AutoApplicator.Application.Interfaces;
 using AutoApplicator.Domain.Entities;
 using AutoApplicator.Domain.Enums;
 using AutoApplicator.Domain.Interfaces;
+using AutoApplicator.Domain.Models;
 using AutoApplicator.Infrastructure.Automation.Models;
 using AutoApplicator.Infrastructure.Automation.Platforms;
 using AutoApplicator.Infrastructure.Services.Exceptions;
@@ -61,6 +62,8 @@ public sealed class AutomationOrchestrator
         OnStatusUpdate?.Invoke(message, current, total);
     }
 
+    private sealed record ProfileResult(int Found, int Applied, int Errors);
+
     // ──────────────────────────────────────────────
     //  Public entry point – Full (search + apply)
     // ──────────────────────────────────────────────
@@ -83,295 +86,13 @@ public sealed class AutomationOrchestrator
 
         UpdateStatus($"Full: processing {profiles.Count} profile(s) in parallel...", 0, profiles.Count);
 
-        var totalFound = 0;
-        var totalApplied = 0;
-        var totalErrors = 0;
+        var results = await Task.WhenAll(
+            profiles.Select(profile =>
+                Task.Run(() => ExecuteProfileSearchAsync(profile, globalEasyApply, maxJobs, token), token)));
 
-        var tasks = profiles.Select(profile =>
-            Task.Run(async () =>
-            {
-                var profilePage = await _playwrightService.CreateNewPageAsync();
-                try
-                {
-                    // === SEARCH PHASE ===
-                    var adapter = _adapterFactory.Create(profile.Platform);
-
-                    _logger.LogInformation("[Profile: {Name}] Starting Full search on {Platform}", profile.Name, profile.Platform);
-                    UpdateProfileStatus(profile.Name, "Full processing...");
-
-                    var searchUrl = await _searchService.NavigateToSearchUrlAsync(adapter, profile, profilePage, token);
-                    await _searchService.WaitForLoginAsync(adapter, profilePage, profile, token);
-
-                    UpdateProfileStatus(profile.Name, "Searching...");
-                    var extractedJobs = await adapter.ExtractListingsAsync(profilePage);
-
-                    _logger.LogInformation("[Profile: {Name}] Extracted {Count} jobs", profile.Name, extractedJobs.Count);
-
-                    var limit = Math.Min(extractedJobs.Count, maxJobs);
-                    var profileApplied = 0;
-                    var profileErrors = 0;
-
-                    // Process first page
-                    for (var j = 0; j < limit; j++)
-                    {
-                        if (token.IsCancellationRequested) break;
-
-                        var extracted = extractedJobs[j];
-                        var isEasyApply = extracted.EasyApply;
-
-                        if (globalEasyApply && !isEasyApply)
-                        {
-                            _logger.LogInformation("[Profile: {Name}] Skipping non-Easy-Apply: '{Title}'", profile.Name, extracted.Title);
-                            continue;
-                        }
-
-                        var (details, updatedExtracted) = await _searchService.FetchJobDetailsAsync(profilePage, adapter, extracted, searchUrl, token);
-                        extracted = updatedExtracted;
-
-                        if (isEasyApply)
-                        {
-                            // Apply in a new page
-                            IBrowserPage? applyPage = null;
-                            try
-                            {
-                                applyPage = await _playwrightService.CreateNewPageAsync();
-
-                                _logger.LogInformation("[Profile: {Name}] Applying to '{Title}' at {Company}", profile.Name, extracted.Title, extracted.Company);
-
-                                await applyPage.GoToAsync(extracted.Url);
-                                await Task.Delay(3000, token);
-
-                                var jobListing = new JobListing
-                                {
-                                    Id = Guid.NewGuid(),
-                                    ExternalId = extracted.ExternalId,
-                                    Platform = profile.Platform,
-                                    ProfileId = profile.Id,
-                                    Url = extracted.Url,
-                                    Title = extracted.Title,
-                                    Company = extracted.Company,
-                                    Location = extracted.Location,
-                                    EasyApply = true,
-                                    Status = JobStatus.New,
-                                    CreatedAt = DateTime.UtcNow,
-                                    UpdatedAt = DateTime.UtcNow
-                                };
-
-                                UpdateProfileStatus(profile.Name, "Applying...");
-                                var result = await _applyService.ApplyForPlatformAsync(applyPage, jobListing, profile.Platform, token);
-
-                                if (result.Success)
-                                {
-                                    jobListing.Status = JobStatus.Applied;
-                                    jobListing.AppliedAt = DateTime.UtcNow;
-                                    jobListing.ApplicationAnswers = result.AnswersUsed;
-                                    _logger.LogInformation("[Profile: {Name}] ✅ Applied: '{Title}'", profile.Name, extracted.Title);
-                                    Interlocked.Increment(ref totalApplied);
-                                    profileApplied++;
-                                }
-                                else if (result.NeedsManualIntervention)
-                                {
-                                    jobListing.Status = JobStatus.Pending;
-                                    jobListing.UserNotes = result.ErrorMessage;
-                                    _logger.LogInformation("[Profile: {Name}] ⏭️ Pending: '{Title}' (needs answers)", profile.Name, extracted.Title);
-                                }
-                                else
-                                {
-                                    jobListing.Status = JobStatus.Error;
-                                    jobListing.UserNotes = result.ErrorMessage;
-                                    _logger.LogWarning("[Profile: {Name}] ❌ Failed: '{Title}': {Error}", profile.Name, extracted.Title, result.ErrorMessage);
-                                    Interlocked.Increment(ref totalErrors);
-                                    profileErrors++;
-                                }
-
-                                using var saveScope = _scopeFactory.CreateScope();
-                                var jobRepo = saveScope.ServiceProvider.GetRequiredService<IJobRepository>();
-                                await jobRepo.AddAsync(jobListing, token);
-                            }
-                            catch (OperationCanceledException) { throw; }
-                            catch (Exception ex)
-                            {
-                                Interlocked.Increment(ref totalErrors);
-                                _logger.LogError(ex, "[Profile: {Name}] Error applying to '{Title}'", profile.Name, extracted.Title);
-                            }
-                            finally
-                            {
-                                if (applyPage is not null)
-                                {
-                                    try { await applyPage.CloseAsync(); } catch { /* ignore */ }
-                                }
-                            }
-                        }
-                        else
-                        {
-                            // Save as New
-                            _logger.LogInformation("[Profile: {Name}] Saving non-Easy-Apply job: '{Title}' at {Company}", profile.Name, extracted.Title, extracted.Company);
-                            using var scope = _scopeFactory.CreateScope();
-                            var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
-                            await JobSearchService.SaveJobAsync(jobRepo, extracted, details, profile, false);
-                        }
-
-                        Interlocked.Increment(ref totalFound);
-                    }
-
-                    // Pagination: navigate to next pages
-                    var pageNum = 1;
-                    var totalExtracted = limit;
-
-                    while (!token.IsCancellationRequested && totalExtracted < maxJobs)
-                    {
-                        pageNum++;
-                        _logger.LogInformation("[Profile: {Name}] Page {PageNum} for pagination", profile.Name, pageNum);
-
-                        await adapter.NavigateToPageAsync(profilePage, profile, pageNum);
-                        await Task.Delay(2000, token);
-
-                        var moreJobs = await adapter.ExtractListingsAsync(profilePage);
-                        _logger.LogInformation("[Profile: {Name}] Page {PageNum}: found {Count} job(s)", profile.Name, pageNum, moreJobs.Count);
-
-                        if (moreJobs.Count == 0)
-                        {
-                            _logger.LogInformation("[Profile: {Name}] No results on page {PageNum}, ending pagination", profile.Name, pageNum);
-                            break;
-                        }
-
-                        var remaining = maxJobs - totalExtracted;
-                        var jobsToProcess = Math.Min(moreJobs.Count, remaining);
-
-                        for (var k = 0; k < jobsToProcess; k++)
-                        {
-                            if (token.IsCancellationRequested) break;
-
-                            var extracted = moreJobs[k];
-                            var isEasyApply = extracted.EasyApply;
-
-                            if (globalEasyApply && !isEasyApply)
-                            {
-                                _logger.LogInformation("[Profile: {Name}] Skipping non-Easy-Apply: '{Title}'", profile.Name, extracted.Title);
-                                continue;
-                            }
-
-                            var (details, updatedExtracted) = await _searchService.FetchJobDetailsAsync(profilePage, adapter, extracted, searchUrl, token);
-                            extracted = updatedExtracted;
-
-                            if (isEasyApply)
-                            {
-                                // Apply in a new page
-                                IBrowserPage? applyPage = null;
-                                try
-                                {
-                                    applyPage = await _playwrightService.CreateNewPageAsync();
-
-                                    _logger.LogInformation("[Profile: {Name}] Applying to '{Title}' at {Company}", profile.Name, extracted.Title, extracted.Company);
-
-                                    await applyPage.GoToAsync(extracted.Url);
-                                    await Task.Delay(3000, token);
-
-                                    var jobListing = new JobListing
-                                    {
-                                        Id = Guid.NewGuid(),
-                                        ExternalId = extracted.ExternalId,
-                                        Platform = profile.Platform,
-                                        ProfileId = profile.Id,
-                                        Url = extracted.Url,
-                                        Title = extracted.Title,
-                                        Company = extracted.Company,
-                                        Location = extracted.Location,
-                                        EasyApply = true,
-                                        Status = JobStatus.New,
-                                        CreatedAt = DateTime.UtcNow,
-                                        UpdatedAt = DateTime.UtcNow
-                                    };
-
-                                    UpdateProfileStatus(profile.Name, "Applying...");
-                                    var result = await _applyService.ApplyForPlatformAsync(applyPage, jobListing, profile.Platform, token);
-
-                                    if (result.Success)
-                                    {
-                                        jobListing.Status = JobStatus.Applied;
-                                        jobListing.AppliedAt = DateTime.UtcNow;
-                                        jobListing.ApplicationAnswers = result.AnswersUsed;
-                                        _logger.LogInformation("[Profile: {Name}] ✅ Applied: '{Title}'", profile.Name, extracted.Title);
-                                        Interlocked.Increment(ref totalApplied);
-                                        profileApplied++;
-                                    }
-                                    else if (result.NeedsManualIntervention)
-                                    {
-                                        jobListing.Status = JobStatus.Pending;
-                                        jobListing.UserNotes = result.ErrorMessage;
-                                        _logger.LogInformation("[Profile: {Name}] ⏭️ Pending: '{Title}' (needs answers)", profile.Name, extracted.Title);
-                                    }
-                                    else
-                                    {
-                                        jobListing.Status = JobStatus.Error;
-                                        jobListing.UserNotes = result.ErrorMessage;
-                                        _logger.LogWarning("[Profile: {Name}] ❌ Failed: '{Title}': {Error}", profile.Name, extracted.Title, result.ErrorMessage);
-                                        Interlocked.Increment(ref totalErrors);
-                                        profileErrors++;
-                                    }
-
-                                    using var saveScope = _scopeFactory.CreateScope();
-                                    var jobRepo = saveScope.ServiceProvider.GetRequiredService<IJobRepository>();
-                                    await jobRepo.AddAsync(jobListing, token);
-                                }
-                                catch (OperationCanceledException) { throw; }
-                                catch (Exception ex)
-                                {
-                                    Interlocked.Increment(ref totalErrors);
-                                    _logger.LogError(ex, "[Profile: {Name}] Error applying to '{Title}'", profile.Name, extracted.Title);
-                                }
-                                finally
-                                {
-                                    if (applyPage is not null)
-                                    {
-                                        try { await applyPage.CloseAsync(); } catch { /* ignore */ }
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                // Save as New
-                                _logger.LogInformation("[Profile: {Name}] Saving non-Easy-Apply job: '{Title}' at {Company}", profile.Name, extracted.Title, extracted.Company);
-                                using var scope = _scopeFactory.CreateScope();
-                                var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
-                                await JobSearchService.SaveJobAsync(jobRepo, extracted, details, profile, false);
-                            }
-
-                            totalExtracted++;
-                            Interlocked.Increment(ref totalFound);
-                        }
-
-                        if (totalExtracted >= maxJobs)
-                        {
-                            _logger.LogInformation("[Profile: {Name}] Reached max jobs limit ({MaxJobs}) on page {PageNum}", profile.Name, maxJobs, pageNum);
-                            break;
-                        }
-
-                        if (moreJobs.Count < 25)
-                        {
-                            _logger.LogInformation("[Profile: {Name}] Less than 25 results on page {PageNum}, assuming last page", profile.Name, pageNum);
-                            break;
-                        }
-                    }
-
-                    _logger.LogInformation("[Profile: {Name}] Full processing complete: {Applied} applied, {Errors} errors",
-                        profile.Name, profileApplied, profileErrors);
-
-                    UpdateProfileStatus(profile.Name, "Complete");
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "[Profile: {Name}] Full processing failed", profile.Name);
-                    _notifications.Add(NotificationType.Error, $"{profile.Platform} Error", $"{profile.Name}: {ex.Message}");
-                }
-                finally
-                {
-                    try { await profilePage.CloseAsync(); } catch { /* ignore */ }
-                }
-            }, token));
-
-        await Task.WhenAll(tasks);
+        var totalFound = results.Sum(r => r.Found);
+        var totalApplied = results.Sum(r => r.Applied);
+        var totalErrors = results.Sum(r => r.Errors);
 
         _logger.LogInformation("Full automation complete: {Found} jobs found, {Applied} applied, {Errors} errors across {Profiles} profile(s)",
             totalFound, totalApplied, totalErrors, profiles.Count);
@@ -380,5 +101,176 @@ public sealed class AutomationOrchestrator
             _notifications.Add(NotificationType.Success, "Full Automation Complete", $"Applied to {totalApplied} job(s) across {profiles.Count} profiles.", "View Jobs", "/jobs");
         if (totalErrors > 0)
             _notifications.Add(NotificationType.Warning, "Full Automation", $"{totalErrors} error(s) occurred.");
+    }
+
+    private async Task<ProfileResult> ExecuteProfileSearchAsync(
+        SearchProfile profile, bool globalEasyApply, int maxJobs, CancellationToken token)
+    {
+        var profilePage = await _playwrightService.CreateNewPageAsync();
+        try
+        {
+            var adapter = _adapterFactory.Create(profile.Platform);
+
+            _logger.LogInformation("[Profile: {Name}] Starting Full search on {Platform}", profile.Name, profile.Platform);
+            UpdateProfileStatus(profile.Name, "Full processing...");
+
+            var searchUrl = await _searchService.NavigateToSearchUrlAsync(adapter, profile, profilePage, token);
+            await _searchService.WaitForLoginAsync(adapter, profilePage, profile, token);
+
+            UpdateProfileStatus(profile.Name, "Searching...");
+
+            // Fase 1: Collect all jobs from all pages quickly (card-level only)
+            var allJobs = await _searchService.CollectAllJobsFromAllPagesAsync(
+                adapter, profilePage, profile, maxJobs, globalEasyApply, token);
+
+            _logger.LogInformation("[Profile: {Name}] Collected {Count} jobs across all pages", profile.Name, allJobs.Count);
+
+            // Fase 2: Process each job
+            var totalFound = 0;
+            var totalApplied = 0;
+            var totalErrors = 0;
+
+            for (var i = 0; i < allJobs.Count; i++)
+            {
+                if (token.IsCancellationRequested) break;
+
+                var extracted = allJobs[i];
+                var isEasyApply = extracted.EasyApply;
+
+                if (isEasyApply)
+                {
+                    // EasyApply: fetch details and apply
+                    var (details, updatedExtracted) = await _searchService.FetchJobDetailsAsync(
+                        profilePage, adapter, extracted, searchUrl, token);
+                    extracted = updatedExtracted;
+
+                    var result = await ApplyToEasyApplyJobAsync(profile, extracted, details, token);
+                    totalFound += result.Found;
+                    totalApplied += result.Applied;
+                    totalErrors += result.Errors;
+                }
+                else
+                {
+                    // Non-EasyApply: save without fetching details
+                    await SaveNonEasyApplyJobAsync(profile, extracted, null);
+                    totalFound++;
+                }
+            }
+
+            _logger.LogInformation("[Profile: {Name}] Full processing complete: {Applied} applied, {Errors} errors",
+                profile.Name, totalApplied, totalErrors);
+
+            UpdateProfileStatus(profile.Name, "Complete");
+            return new ProfileResult(totalFound, totalApplied, totalErrors);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Profile: {Name}] Full processing failed", profile.Name);
+            _notifications.Add(NotificationType.Error, $"{profile.Platform} Error", $"{profile.Name}: {ex.Message}");
+            return new ProfileResult(0, 0, 0);
+        }
+        finally
+        {
+            try { await profilePage.CloseAsync(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to close profile page for '{Name}'", profile.Name); }
+        }
+    }
+
+    private async Task<ProfileResult> ApplyToEasyApplyJobAsync(
+        SearchProfile profile, ExtractedJob extracted, JobDetail? details, CancellationToken token)
+    {
+        IBrowserPage? applyPage = null;
+        try
+        {
+            applyPage = await _playwrightService.CreateNewPageAsync();
+
+            _logger.LogInformation("[Profile: {Name}] Applying to '{Title}' at {Company}", profile.Name, extracted.Title, extracted.Company);
+
+            await applyPage.GoToAsync(extracted.Url);
+            await Task.Delay(3000, token);
+
+            var jobListing = CreateJobListing(extracted, profile);
+
+            UpdateProfileStatus(profile.Name, "Applying...");
+            var result = await _applyService.ApplyForPlatformAsync(applyPage, jobListing, profile.Platform, token);
+
+            return await HandleApplyResultAsync(jobListing, result, profile, extracted, token);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Profile: {Name}] Error applying to '{Title}'", profile.Name, extracted.Title);
+            return new ProfileResult(0, 0, 1);
+        }
+        finally
+        {
+            if (applyPage is not null)
+            {
+                try { await applyPage.CloseAsync(); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to close apply page for '{Title}'", extracted.Title); }
+            }
+        }
+    }
+
+    private async Task<ProfileResult> HandleApplyResultAsync(
+        JobListing jobListing, ApplyResult result, SearchProfile profile, ExtractedJob extracted, CancellationToken token)
+    {
+        if (result.Success)
+        {
+            jobListing.Status = JobStatus.Applied;
+            jobListing.AppliedAt = DateTime.UtcNow;
+            jobListing.ApplicationAnswers = result.AnswersUsed;
+            _logger.LogInformation("[Profile: {Name}] ✅ Applied: '{Title}'", profile.Name, extracted.Title);
+        }
+        else if (result.NeedsManualIntervention)
+        {
+            jobListing.Status = JobStatus.Pending;
+            jobListing.UserNotes = result.ErrorMessage;
+            _logger.LogInformation("[Profile: {Name}] ⏭️ Pending: '{Title}' (needs answers)", profile.Name, extracted.Title);
+        }
+        else
+        {
+            jobListing.Status = JobStatus.Error;
+            jobListing.UserNotes = result.ErrorMessage;
+            _logger.LogWarning("[Profile: {Name}] ❌ Failed: '{Title}': {Error}", profile.Name, extracted.Title, result.ErrorMessage);
+        }
+
+        using var saveScope = _scopeFactory.CreateScope();
+        var jobRepo = saveScope.ServiceProvider.GetRequiredService<IJobRepository>();
+        await jobRepo.AddAsync(jobListing, token);
+
+        var isError = !result.Success && !result.NeedsManualIntervention;
+        return new ProfileResult(1, result.Success ? 1 : 0, isError ? 1 : 0);
+    }
+
+    private async Task<ProfileResult> SaveNonEasyApplyJobAsync(SearchProfile profile, ExtractedJob extracted, JobDetail? details)
+    {
+        _logger.LogInformation("[Profile: {Name}] Saving non-Easy-Apply job: '{Title}' at {Company}", profile.Name, extracted.Title, extracted.Company);
+
+        using var scope = _scopeFactory.CreateScope();
+        var jobRepo = scope.ServiceProvider.GetRequiredService<IJobRepository>();
+        await JobSearchService.SaveJobAsync(jobRepo, extracted, details, profile, false);
+
+        return new ProfileResult(1, 0, 0);
+    }
+
+    private static JobListing CreateJobListing(ExtractedJob extracted, SearchProfile profile)
+    {
+        return new JobListing
+        {
+            Id = Guid.NewGuid(),
+            ExternalId = extracted.ExternalId,
+            Platform = profile.Platform,
+            ProfileId = profile.Id,
+            Url = extracted.Url,
+            Title = extracted.Title,
+            Company = extracted.Company,
+            Location = extracted.Location,
+            EasyApply = true,
+            Status = JobStatus.New,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
     }
 }
